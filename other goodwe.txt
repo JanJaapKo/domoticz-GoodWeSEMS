@@ -1,3 +1,4 @@
+=======
 # Copyright 2019 Dylian Melgert
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -47,7 +48,6 @@ class Inverter:
     inputAmps2Unit = 8
     inputAmps3Unit = 11
     inputAmps4Unit = 13
-    outputFreq1Unit = 18
 
     def __init__(self, inverterData, startNum):
         self._sn = inverterData["sn"]
@@ -69,8 +69,6 @@ class Inverter:
         self.inputAmps2Unit = 8 + startNum
         self.inputAmps3Unit = 11 + startNum
         self.inputAmps4Unit = 13 + startNum
-        self.outputFreq1Unit = 18 + startNum
-
 
     def __repr__(self):
         return "Inverter type: '" + self._name + "' with serial number: '" + self._sn + "'"
@@ -154,10 +152,6 @@ class Inverter:
             Domoticz.Device(Name="Inverter input 4 power (SN: " + self.serialNumber + ")",
                             Unit=(self.inputPower4Unit), Type=243, Subtype=29,
                             Switchtype=4, Used=0).Create()
-        if self.outputFreq1Unit not in Devices:
-            Domoticz.Device(Name="Inverter output frequency 1 (SN: " + self.serialNumber + ")",
-                            Unit=(self.outputFreq1Unit), TypeName="Custom",
-                            Used=0).Create()
         if numDevs < len(Devices):
             Domoticz.Log("Number of Devices: " + str(len(Devices)) + ", created for GoodWe inverter (SN: " + self.serialNumber + ")")
         
@@ -288,3 +282,5 @@ class GoodWe:
             }),
             'Headers': self.apiRequestHeaders()
         }
+
+>>>>>>> 5d958e05d6cd342ab0a0bbbbfb7d0e6f09568d33
