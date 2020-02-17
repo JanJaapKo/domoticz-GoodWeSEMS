@@ -17,16 +17,19 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.1" author="dylian94">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.2" author="dylian94">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
         <h3>Devices</h3>
         <ul style="list-style-type:square">
             <li>temperature - Inverter temperature (Celcius)</li>
+            <li>state - operational state of the inverter</li>
             <li>power - Current and total output power (Watts)</li>
             <li>current - Output current (ampere)</li>
             <li>voltage - Output Voltage</li>
+            <li>frequency - Output frquency [Hz]</li>
+            <li>inputs - Power/Current/Voltage per input string</li>
         </ul>
         <h3>Configuration</h3>
         <ul>
@@ -234,9 +237,11 @@ class GoodWeSEMSPlugin:
                             
                             theInverter = theStation.inverters[inverter["sn"]]
 
-                            Devices[theInverter.inverterTemperatureUnit].Update(nValue=0, sValue=str(inverter["tempperature"]))
+                            UpdateDevice(theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
+                            #Devices[theInverter.inverterTemperatureUnit].Update(nValue=0, sValue=str(inverter["tempperature"]))
                             Devices[theInverter.outputCurrentUnit].Update(nValue=0, sValue=str(inverter["output_current"]))
-                            Devices[theInverter.outputFreq1Unit].Update(nValue=0, sValue=str(inverter["d"]["fac1"]))
+                            UpdateDevice(theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
+                            #Devices[theInverter.outputFreq1Unit].Update(nValue=0, sValue=str(inverter["d"]["fac1"]))
                             Devices[theInverter.outputVoltageUnit].Update(nValue=0, sValue=str(inverter["output_voltage"]))
                             Devices[theInverter.outputPowerUnit].Update(nValue=0, sValue=str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000))
                             Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + self.goodWeInverter.INVERTER_STATE[inverter["status"]] + "'")
@@ -327,6 +332,20 @@ class GoodWeSEMSPlugin:
 global _plugin
 _plugin = GoodWeSEMSPlugin()
 
+def UpdateDevice(Unit, nValue, sValue, BatteryLevel=255, AlwaysUpdate=False):
+    if Unit not in Devices: return
+    if Devices[Unit].nValue != nValue\
+        or Devices[Unit].sValue != sValue\
+        or Devices[Unit].BatteryLevel != BatteryLevel\
+        or AlwaysUpdate == True:
+
+        Devices[Unit].Update(nValue, str(sValue), BatteryLevel=BatteryLevel)
+
+        Domoticz.Debug("Update %s: nValue %s - sValue %s - BatteryLevel %s" % (
+            Devices[Unit].Name,
+            nValue,
+            sValue,
+            BatteryLevel))
 
 def onStart():
     global _plugin
