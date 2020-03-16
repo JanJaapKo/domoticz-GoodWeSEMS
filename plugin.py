@@ -48,7 +48,7 @@
         </ul>
     </description>
     <params>
-        <param field="Address" label="SEMS Server" width="200" required="true">
+        <param field="Address" label="SEMS Server" width="100px" required="true">
             <options>
                 <option label="Europe" value="eu.semsportal.com"/>
                 <option label="Australia" value="au.semsportal.com"/>
@@ -56,10 +56,10 @@
             </options>
         </param>
         <param field="Port" label="SEMS API Port" width="30px" required="true" default="443"/>
-        <param field="Username" label="E-Mail address" width="200" required="true"/>
-        <param field="Password" label="Password" width="200" required="true" password="true"/>
-        <param field="Mode1" label="Power Station ID (Optional)" width="200"/>
-        <param field="Mode2" label="Refresh interval" width="70px">
+        <param field="Username" label="E-Mail address" width="300px" required="true"/>
+        <param field="Password" label="Password" width="100px" required="true" password="true"/>
+        <param field="Mode1" label="Power Station ID (Optional)" width="300px"/>
+        <param field="Mode2" label="Refresh interval" width="75px">
             <options>
                 <option label="10s" value="1"/>
                 <option label="30s" value="3"/>
