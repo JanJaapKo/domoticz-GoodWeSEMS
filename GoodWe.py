@@ -236,12 +236,11 @@ class GoodWe:
     def numInverters(self):
         return len(self.powerStationList)
         
-    def createStations(self, apiData):
-        for key, station in enumerate(apiData["list"]):
-            powerStation = PowerStation(stationData=station)
-            self.powerStationList.update({key : powerStation})
-            Domoticz.Log("PowerStation found: " + powerStation.id)
-
+    def createStation(self, key, stationData):
+        #for key, station in enumerate(apiData["list"]):
+        powerStation = PowerStation(stationData=stationData)
+        self.powerStationList.update({key : powerStation})
+        Domoticz.Log("PowerStation found: " + powerStation.id)
     
     def apiRequestHeaders(self):
         Domoticz.Debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )

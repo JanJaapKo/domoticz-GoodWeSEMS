@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.2" author="dylian94">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.3" author="dylian94">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -186,12 +186,8 @@ class GoodWeSEMSPlugin:
                     self.goodWeInverter.token = apiData
                     Domoticz.Debug("SEMS API Token: " + json.dumps(self.goodWeInverter.token))
                     self.goodWeInverter.tokenAvailable = True
-
-                    if len(Parameters["Mode1"]) > 0:
-                        self.goodWeInverter.powerStationList.update({0: Parameters["Mode1"]})
-                        Connection.Send(self.goodWeInverter.stationDataRequest())
-                    else:
-                        Connection.Send(self.goodWeInverter.stationListRequest())
+                    #request list of stations on this account
+                    Connection.Send(self.goodWeInverter.stationListRequest())
 
             elif "/api/v2/HistoryData/QueryPowerStationByHistory" in apiUrl:
                 Domoticz.Debug("message received: QueryPowerStationByHistory")
@@ -205,9 +201,10 @@ class GoodWeSEMSPlugin:
                         for data in stations:
                             Domoticz.Debug("station element: '"+ str(data) + "', value: '" + str(stations[data]) +"'")
                     for key, station in enumerate(apiData["list"]):
-                        #self.goodWeInverter.powerStationList.update({key: station["id"]})
-                        self.goodWeInverter.createStations(apiData)
-                        Domoticz.Log("Station found: " + station["id"])
+                        if len(Parameters["Mode1"]) <= 0 or (len(Parameters["Mode1"]) > 0 and station["id"] == Parameters["Mode1"]):
+                            #add all found stations if no ID entered, else only log the one that matches the ID
+                            self.goodWeInverter.createStation(key, station)
+                            Domoticz.Log("Station found: " + station["id"])
 
                     Connection.Send(self.goodWeInverter.stationDataRequest())
 
