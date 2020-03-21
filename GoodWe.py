@@ -47,6 +47,7 @@ class Inverter:
     inputAmps2Unit = 8
     inputAmps3Unit = 11
     inputAmps4Unit = 13
+    outputFreq1Unit = 18
 
     def __init__(self, inverterData, startNum):
         self._sn = inverterData["sn"]
@@ -68,6 +69,8 @@ class Inverter:
         self.inputAmps2Unit = 8 + startNum
         self.inputAmps3Unit = 11 + startNum
         self.inputAmps4Unit = 13 + startNum
+        self.outputFreq1Unit = 18 + startNum
+
 
     def __repr__(self):
         return "Inverter type: '" + self._name + "' with serial number: '" + self._sn + "'"
@@ -151,6 +154,10 @@ class Inverter:
             Domoticz.Device(Name="Inverter input 4 power (SN: " + self.serialNumber + ")",
                             Unit=(self.inputPower4Unit), Type=243, Subtype=29,
                             Switchtype=4, Used=0).Create()
+        if self.outputFreq1Unit not in Devices:
+            Domoticz.Device(Name="Inverter output frequency 1 (SN: " + self.serialNumber + ")",
+                            Unit=(self.outputFreq1Unit), TypeName="Custom",
+                            Used=0).Create()
         if numDevs < len(Devices):
             Domoticz.Log("Number of Devices: " + str(len(Devices)) + ", created for GoodWe inverter (SN: " + self.serialNumber + ")")
         
@@ -229,12 +236,11 @@ class GoodWe:
     def numInverters(self):
         return len(self.powerStationList)
         
-    def createStations(self, apiData):
-        for key, station in enumerate(apiData["list"]):
-            powerStation = PowerStation(stationData=station)
-            self.powerStationList.update({key : powerStation})
-            Domoticz.Log("PowerStation found: " + powerStation.id)
-
+    def createStation(self, key, stationData):
+        #for key, station in enumerate(apiData["list"]):
+        powerStation = PowerStation(stationData=stationData)
+        self.powerStationList.update({key : powerStation})
+        Domoticz.Log("PowerStation found: " + powerStation.id)
     
     def apiRequestHeaders(self):
         Domoticz.Debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
@@ -281,4 +287,3 @@ class GoodWe:
             }),
             'Headers': self.apiRequestHeaders()
         }
-

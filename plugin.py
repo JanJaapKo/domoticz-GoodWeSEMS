@@ -17,16 +17,19 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.1" author="dylian94">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.3" author="dylian94">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
         <h3>Devices</h3>
         <ul style="list-style-type:square">
             <li>temperature - Inverter temperature (Celcius)</li>
+            <li>state - operational state of the inverter</li>
             <li>power - Current and total output power (Watts)</li>
             <li>current - Output current (ampere)</li>
             <li>voltage - Output Voltage</li>
+            <li>frequency - Output frquency [Hz]</li>
+            <li>inputs - Power/Current/Voltage per input string</li>
         </ul>
         <h3>Configuration</h3>
         <ul>
@@ -45,7 +48,7 @@
         </ul>
     </description>
     <params>
-        <param field="Address" label="SEMS Server" width="200" required="true">
+        <param field="Address" label="SEMS Server" width="100px" required="true">
             <options>
                 <option label="Europe" value="eu.semsportal.com"/>
                 <option label="Australia" value="au.semsportal.com"/>
@@ -53,10 +56,10 @@
             </options>
         </param>
         <param field="Port" label="SEMS API Port" width="30px" required="true" default="443"/>
-        <param field="Username" label="E-Mail address" width="200" required="true"/>
-        <param field="Password" label="Password" width="200" required="true" password="true"/>
-        <param field="Mode1" label="Power Station ID (Optional)" width="200"/>
-        <param field="Mode2" label="Refresh interval" width="70px">
+        <param field="Username" label="E-Mail address" width="300px" required="true"/>
+        <param field="Password" label="Password" width="100px" required="true" password="true"/>
+        <param field="Mode1" label="Power Station ID (Optional)" width="300px"/>
+        <param field="Mode2" label="Refresh interval" width="75px">
             <options>
                 <option label="10s" value="1"/>
                 <option label="30s" value="3"/>
@@ -121,13 +124,20 @@ class GoodWeSEMSPlugin:
                                        Address=Parameters["Address"], Port=Parameters["Port"])
 
     def startDeviceUpdate(self, Connection):
+        Domoticz.Debug("startDeviceUpdate, token availability: '" + str(self.goodWeInverter.tokenAvailable)+ "'")
         if not self.goodWeInverter.tokenAvailable:
             self.goodWeInverter.powerStationList = {}
             self.goodWeInverter.powerStationIndex = 0
             self.devicesUpdated = False
             Connection.Send(self.goodWeInverter.tokenRequest(Parameters["Username"], Parameters["Password"]))
         else:
-            Connection.Send(self.goodWeInverter.stationDataRequest())
+            if self.goodWeInverter.numInverters > 0:
+                Connection.Send(self.goodWeInverter.stationDataRequest())
+            else:
+                Domoticz.Log("request device update but no inverters found.")
+                self.httpConn.Disconnect()
+                self.httpConn = None
+
 
     def onStart(self):
         if Parameters["Mode6"] == "Verbose":
@@ -147,6 +157,7 @@ class GoodWeSEMSPlugin:
         Domoticz.Log("onStop - Plugin is stopping.")
 
     def onConnect(self, Connection, Status, Description):
+        Domoticz.Debug("onConnect: Status: '" + str(Status) + "', Description: '" + Description + "'")
         if (Status == 0):
             Domoticz.Debug("Connected to SEMS portal API successfully.")
             self.startDeviceUpdate(Connection)
@@ -165,35 +176,47 @@ class GoodWeSEMSPlugin:
 
             if "api/v2/Common/CrossLogin" in apiUrl:
                 Domoticz.Debug("message received: CrossLogin")
-                self.goodWeInverter.token = apiData
-                Domoticz.Debug("SEMS API Token: " + json.dumps(self.goodWeInverter.token))
-                self.goodWeInverter.tokenAvailable = True
-
-                if len(Parameters["Mode1"]) > 0:
-                    self.goodWeInverter.powerStationList.update({0: Parameters["Mode1"]})
-                    Connection.Send(self.goodWeInverter.stationDataRequest())
+                if apiData == 'Null':
+                    Domoticz.Log("SEMS API Token not received")
+                    self.goodWeInverter.tokenAvailable = False
+                    self.httpConn.Disconnect()
+                    #self.httpConn = None
                 else:
+                    Domoticz.Debug("message apiData: '" + str(apiData) + "'")
+                    self.goodWeInverter.token = apiData
+                    Domoticz.Debug("SEMS API Token: " + json.dumps(self.goodWeInverter.token))
+                    self.goodWeInverter.tokenAvailable = True
+                    #request list of stations on this account
                     Connection.Send(self.goodWeInverter.stationListRequest())
 
             elif "/api/v2/HistoryData/QueryPowerStationByHistory" in apiUrl:
                 Domoticz.Debug("message received: QueryPowerStationByHistory")
-                for stations in apiData["list"]:
-                    for data in stations:
-                        Domoticz.Debug("station element: '"+ str(data) + "', value: '" + str(stations[data]) +"'")
-                for key, station in enumerate(apiData["list"]):
-                    #self.goodWeInverter.powerStationList.update({key: station["id"]})
-                    self.goodWeInverter.createStations(apiData)
-                    Domoticz.Log("Station found: " + station["id"])
+                if apiData is None or len(apiData)==0:
+                    Domoticz.Log("Power station history not received")
+                    self.httpConn.Disconnect()
+                    #self.httpConn = None
+                else:
+                    Domoticz.Debug("message apiData: '" + str(apiData) + "'")
+                    for stations in apiData["list"]:
+                        for data in stations:
+                            Domoticz.Debug("station element: '"+ str(data) + "', value: '" + str(stations[data]) +"'")
+                    for key, station in enumerate(apiData["list"]):
+                        if len(Parameters["Mode1"]) <= 0 or (len(Parameters["Mode1"]) > 0 and station["id"] == Parameters["Mode1"]):
+                            #add all found stations if no ID entered, else only log the one that matches the ID
+                            self.goodWeInverter.createStation(key, station)
+                            Domoticz.Log("Station found: " + station["id"])
 
-                Connection.Send(self.goodWeInverter.stationDataRequest())
+                    Connection.Send(self.goodWeInverter.stationDataRequest())
 
             elif "api/v2/PowerStation/GetMonitorDetailByPowerstationId" in apiUrl:
                 Domoticz.Debug("message received: GetMonitorDetailByPowerstationId")
-                if apiData is None:
-                    Domoticz.Error("No station data received from GoodWe SEMS API (Station ID: " + self.goodWeInverter.powerStationList[
-                        self.powerStationIndex] + ")")
+                #Domoticz.Debug("message: '" + apiData + "'")
+                if apiData is None or len(apiData) == 0:
+                    Domoticz.Error("No station data received from GoodWe SEMS API (Station ID: " + str(self.goodWeInverter.powerStationList[
+                        self.goodWeInverter.powerStationIndex]) + ")")
                     self.goodWeInverter.tokenAvailable = False
                 else:
+                    #Domoticz.Debug("message apiData: '" + str(apiData) + "'")
                     Domoticz.Log("Station data received from GoodWe SEMS API ('" + str(self.goodWeInverter.powerStationList[
                         self.goodWeInverter.powerStationIndex]) + "', index : '" + str(self.goodWeInverter.powerStationIndex)+ "')")
                     theStation = self.goodWeInverter.powerStationList[self.goodWeInverter.powerStationIndex]
@@ -202,44 +225,54 @@ class GoodWeSEMSPlugin:
                         Domoticz.Debug("inverter found with SN: '" + inverter["sn"] + "'")
                         if inverter["sn"] in theStation.inverters:
                             theStation.inverters[inverter["sn"]].createDevices(Devices)
+                            #invertFull = inverter["invert_full"]
+                            #Domoticz.Debug("found in inverter: '" + str(inverter) + "'")
+                            #Domoticz.Debug("found in inverter full: '" + str(invertFull) + "'")
+                            # for data in inverter:
+                                # Domoticz.Debug("data in inverter: '" + str(data) + "', value '" + str(inverter[data]) + "'")
+                            Domoticz.Debug("Details d in inverter: '" + str(inverter['d']) + "'")
                             
                             theInverter = theStation.inverters[inverter["sn"]]
 
-                            Devices[theInverter.inverterTemperatureUnit].Update(nValue=0, sValue=str(inverter["tempperature"]))
-                            Devices[theInverter.outputCurrentUnit].Update(nValue=0, sValue=str(inverter["output_current"]))
-                            Devices[theInverter.outputVoltageUnit].Update(nValue=0, sValue=str(inverter["output_voltage"]))
-                            Devices[theInverter.outputPowerUnit].Update(nValue=0, sValue=str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000))
+                            if len(inverter['fault_message']) > 0:
+                                Domoticz.Log("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
                             Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + self.goodWeInverter.INVERTER_STATE[inverter["status"]] + "'")
                             Devices[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
+                            if self.goodWeInverter.INVERTER_STATE[inverter["status"]] == 'generating':
+                                Domoticz.Debug("inverter generating, log temp")
+                                UpdateDevice(theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
+                                UpdateDevice(theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
+
+                            UpdateDevice(theInverter.outputCurrentUnit, 0, str(inverter["output_current"]), AlwaysUpdate=True)
+                            UpdateDevice(theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]), AlwaysUpdate=True)
+                            UpdateDevice(theInverter.outputPowerUnit, 0, str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000), AlwaysUpdate=True)
                             inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
                             inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
                             #Domoticz.Debug("power calc = V: '"+inputVoltage[:-1]+"', A: '"+inputAmps[:-1]+"', power: W: '" + str(inputPower) + "'")
-                            Devices[theInverter.inputVoltage1Unit].Update(nValue=0, sValue=inputVoltage)
-                            Devices[theInverter.inputAmps1Unit].Update(nValue=0, sValue=inputAmps)
-                            Devices[theInverter.inputPower1Unit].Update(nValue=0, sValue=str(inputPower) + ";0")
+                            UpdateDevice(theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
+                            UpdateDevice(theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
+                            UpdateDevice(theInverter.inputPower1Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                             if "pv_input_2" in inverter:
                                 Domoticz.Debug("Second string found")
                                 inputVoltage,inputAmps = inverter["pv_input_2"].split('/')
-                                Devices[theInverter.inputVoltage2Unit].Update(nValue=0, sValue=inputVoltage)
-                                Devices[theInverter.inputAmps2Unit].Update(nValue=0, sValue=inputAmps)
+                                UpdateDevice(theInverter.inputVoltage2Unit, 0, inputVoltage, AlwaysUpdate=True)
+                                UpdateDevice(theInverter.inputAmps2Unit, 0, inputAmps, AlwaysUpdate=True)
                                 inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
-                                Devices[theInverter.inputPower2Unit].Update(nValue=0, sValue=str(inputPower) + ";0")
+                                UpdateDevice(theInverter.inputPower2Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                             if "pv_input_3" in inverter:
                                 Domoticz.Debug("Third string found")
                                 inputVoltage,inputAmps = inverter["pv_input_3"].split('/')
-                                Devices[theInverter.inputVoltage3Unit].Update(nValue=0, sValue=inputVoltage)
-                                Devices[theInverter.inputAmps3Unit].Update(nValue=0, sValue=inputAmps)
+                                UpdateDevice(theInverter.inputVoltage3Unit, 0, inputVoltage, AlwaysUpdate=True)
+                                UpdateDevice(theInverter.inputAmps3Unit, 0, inputAmps, AlwaysUpdate=True)
                                 inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                                Devices[theInverter.inputPower3Unit].Update(nValue=0, sValue=str(inputPower) + ";0")
+                                UpdateDevice(theInverter.inputPower3Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                             if "pv_input_4" in inverter:
                                 Domoticz.Debug("Fourth string found")
                                 inputVoltage,inputAmps = inverter["pv_input_4"].split('/')
-                                Devices[theInverter.inputVoltage4Unit].Update(nValue=0, sValue=inputVoltage)
-                                Devices[theInverter.inputAmps4Unit].Update(nValue=0, sValue=inputAmps)
+                                UpdateDevice(theInverter.inputVoltage4Unit, 0, inputVoltage, AlwaysUpdate=True)
+                                UpdateDevice(theInverter.inputAmps4Unit, 0, inputAmps, AlwaysUpdate=True)
                                 inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                                Devices[theInverter.inputPower4Unit].Update(nValue=0, sValue=str(inputPower) + ";0")
-                            # for data in inverter:
-                                # Domoticz.Debug("data in inverter: '" + str(data) + "', value '" + str(inverter[data]) + "'")
+                                UpdateDevice(theInverter.inputPower4Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                         else:
                             Domoticz.Log("Unknown inverter found with S/N: '" + inverter["sn"] +"'.")
 
@@ -248,7 +281,7 @@ class GoodWeSEMSPlugin:
                     if self.runAgain > 2:
                         Domoticz.Log("Next active heartbeat far away, disconnecting and dropping connection.")
                         self.httpConn.Disconnect()
-                        self.httpConn = None
+                        #self.httpConn = None
 
                     #Domoticz.Log("Updated " + str(len(Devices)) + " device(s) for " + str(len(self.goodWeInverter.powerStationList)) + " station(s) with " + str(int(self.baseDeviceIndex / self.maxDeviceIndex)) + " inverter(s)")
                     self.devicesUpdated = True
@@ -271,6 +304,7 @@ class GoodWeSEMSPlugin:
 
     def onDisconnect(self, Connection):
         Domoticz.Debug("onDisconnect called for connection to: " + Connection.Address + ":" + Connection.Port)
+        self.httpConn = None
 
     def onHeartbeat(self):
         if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
@@ -296,6 +330,20 @@ class GoodWeSEMSPlugin:
 global _plugin
 _plugin = GoodWeSEMSPlugin()
 
+def UpdateDevice(Unit, nValue, sValue, BatteryLevel=255, AlwaysUpdate=False):
+    if Unit not in Devices: return
+    if Devices[Unit].nValue != nValue\
+        or Devices[Unit].sValue != sValue\
+        or Devices[Unit].BatteryLevel != BatteryLevel\
+        or AlwaysUpdate == True:
+
+        Devices[Unit].Update(nValue, str(sValue), BatteryLevel=BatteryLevel)
+
+        Domoticz.Debug("Update %s: nValue %s - sValue %s - BatteryLevel %s" % (
+            Devices[Unit].Name,
+            nValue,
+            sValue,
+            BatteryLevel))
 
 def onStart():
     global _plugin
