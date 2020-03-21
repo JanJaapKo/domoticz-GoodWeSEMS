@@ -35,7 +35,7 @@ git pull
 
 Contributing
 ------------
-Even if you do not know how to develop software you can help by using the [GitHub Issues](https://github.com/dylian94/domoticz-GoodWeSEMS/issues)
+Even if you do not know how to develop software you can help by using the [GitHub Issues](https://github.com/janjaapko/domoticz-GoodWeSEMS/issues)
 for feature request or bug reports. If you DO know how to develop software please help improving this project by submitting pull-requests.
 
 Current features
@@ -47,5 +47,7 @@ Current features
     - power: Current and total output power (Watts)
     - current - Output current (ampere)
     - voltage - Output Voltage
+    - frequency - Output frequncy (Hz, first phase)
+    - input strings: Voltage, current and power per string
 
 There is a lot more information available trough the GoodWe API if you would like to have a specific feature added too this plugin please submit an issue as indicated in the paragraph above. 
