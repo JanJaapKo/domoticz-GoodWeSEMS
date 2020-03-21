@@ -2,6 +2,8 @@ Domoticz GoodWe Solar Inverter plugin (SEMS API)
 ===============================================
 This plugin provides information about your GoodWe solar inverter too Domoticz. This plugin has been made by analysing requests made by the GoodWe SEMS Portal website and following the API documentation provided by GoodWe.
 
+this plugin was created by Dylian94 () but that version seems out of maintenance.
+
 Installation and setup
 ----------------------
 Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wiki/Using_Python_plugins).
@@ -9,7 +11,7 @@ Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wik
 Login to a shell, go to the domoticz plugin directory and clone this repository:
 ```bash
 cd domoticz/plugins
-git clone https://github.com/dylian94/domoticz-GoodWeSEMS.git
+git clone https://github.com/janjaapko/domoticz-GoodWeSEMS.git
 ```
 
 Restart Domoticz server, you can try one of these commands (on Linux):
