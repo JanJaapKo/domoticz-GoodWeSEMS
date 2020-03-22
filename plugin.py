@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.3" author="dylian94">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.4" author="dylian94">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -132,7 +132,7 @@ class GoodWeSEMSPlugin:
             Connection.Send(self.goodWeInverter.tokenRequest(Parameters["Username"], Parameters["Password"]))
         else:
             if self.goodWeInverter.numInverters > 0:
-                Connection.Send(self.goodWeInverter.stationDataRequest())
+                Connection.Send(self.goodWeInverter.stationDataRequest(self.baseDeviceIndex))
             else:
                 Domoticz.Log("request device update but no inverters found.")
                 self.httpConn.Disconnect()
@@ -206,7 +206,7 @@ class GoodWeSEMSPlugin:
                             self.goodWeInverter.createStation(key, station)
                             Domoticz.Log("Station found: " + station["id"])
 
-                    Connection.Send(self.goodWeInverter.stationDataRequest())
+                    Connection.Send(self.goodWeInverter.stationDataRequest(self.baseDeviceIndex))
 
             elif "api/v2/PowerStation/GetMonitorDetailByPowerstationId" in apiUrl:
                 Domoticz.Debug("message received: GetMonitorDetailByPowerstationId")
@@ -286,9 +286,9 @@ class GoodWeSEMSPlugin:
                     #Domoticz.Log("Updated " + str(len(Devices)) + " device(s) for " + str(len(self.goodWeInverter.powerStationList)) + " station(s) with " + str(int(self.baseDeviceIndex / self.maxDeviceIndex)) + " inverter(s)")
                     self.devicesUpdated = True
                 else:
-                    Domoticz.Debug("Retrieving next station data (ID: " + self.goodWeInverter.powerStationList[self.goodWeInverter.powerStationIndex] + ")")
+                    Domoticz.Debug("Retrieving next station data (ID: " + self.goodWeInverter.powerStationList[self.baseDeviceIndex] + ")")
                     self.baseDeviceIndex += 1
-                    Connection.Send(self.goodWeInverter.stationDataRequest())
+                    Connection.Send(self.goodWeInverter.stationDataRequest(self.baseDeviceIndex))
 
         elif status == 302:
             Domoticz.Error("GoodWe SEMS API returned a Page Moved Error.")

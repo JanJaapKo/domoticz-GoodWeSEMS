@@ -276,9 +276,10 @@ class GoodWe:
             'Headers': self.apiRequestHeaders()
         }
 
-    def stationDataRequest(self):
-        Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = " + str(self.numInverters))
-        powerStation = self.powerStationList[self.powerStationIndex]
+    def stationDataRequest(self, stationIndex):
+        Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numInverters) + "' for PS index: '" + str(stationIndex) + "'")
+        #powerStation = self.powerStationList[self.powerStationIndex]
+        powerStation = self.powerStationList[stationIndex]
         return {
             'Verb': 'POST',
             'URL': '/api/v2/PowerStation/GetMonitorDetailByPowerstationId',
