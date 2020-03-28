@@ -36,7 +36,7 @@ git pull
 Contributing
 ------------
 Even if you do not know how to develop software you can help by using the [GitHub Issues](https://github.com/janjaapko/domoticz-GoodWeSEMS/issues)
-for feature request or bug reports. If you DO know how to develop software please help improving this project by submitting pull-requests.
+for feature request or bug reports. If you DO know how to develop software please help improving this project by submitting pull-requests. Make sure to update and run the included unit tests (```python plugin_test.py```) prior to submitting
 
 Current features
 ----------------
@@ -50,4 +50,4 @@ Current features
     - frequency - Output frequncy (Hz, first phase)
     - input strings: Voltage, current and power per string
 
-There is a lot more information available trough the GoodWe API if you would like to have a specific feature added too this plugin please submit an issue as indicated in the paragraph above. 
+There is a lot more information available trough the GoodWe API if you would like to have a specific feature added to this plugin please submit an issue as indicated in the paragraph above. 
