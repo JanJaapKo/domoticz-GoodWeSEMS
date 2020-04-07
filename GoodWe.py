@@ -199,7 +199,7 @@ class PowerStation:
     def createInverters(self, stationData):
         for inverter in stationData["inverters"]:
             self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
-            Domoticz.Debug("inverter created: '" + str(self.inverters[inverter['sn']]) + "'")
+            Domoticz.Debug("inverter created: '" + str(inverter['sn']) + "'")
             self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
   
     @property
