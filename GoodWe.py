@@ -25,9 +25,17 @@
 # string: a series of solar panels connected to 1 input of the inverter
 
 import json
-import Domoticz
+try:
+	import Domoticz
+	debug = False
+except ImportError:
+	import fakeDomoticz as Domoticz
+	debug = True
 
 class Inverter:
+    """
+    A class to describe the methods and properties of a GoodWe inverter
+    """
     domoticzDevices = 20
     
     inverterTemperatureUnit = 1
@@ -162,13 +170,19 @@ class Inverter:
             Domoticz.Log("Number of Devices: " + str(len(Devices)) + ", created for GoodWe inverter (SN: " + self.serialNumber + ")")
         
 class PowerStation:
+    """
+    A class to describe the methods and properties of a GoodWe PowerStation.
+    A power station is typically 1 adress with 1 or more inverters.
+    """
+
     _name = ""
     _address = ""
     _id = ""
-    inverters = {}
+    inverters = None
     _firstDevice = 0
     
     def __init__(self, stationData=None, id=None, firstDevice=0):
+        self.inverters = {}
         if stationData is None:
             self._id = id
         else:
@@ -176,14 +190,18 @@ class PowerStation:
             self._name = stationData["pw_name"]
             self._address = stationData["pw_address"]
             self._id = stationData["id"]
-            for inverter in stationData["inverters"]:
-                self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
-                Domoticz.Debug("inverter created: '" + str(self.inverters[inverter['sn']]) + "'")
-                self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
+            Domoticz.Debug("create station with id: '" + stationData["id"] + "' and inverters: " + str(len(stationData["inverters"])) )
+            self.createInverters(stationData)
             
     def __repr__(self):
         return "Station ID: '" + self._id + "', name: '" + self._name + "', inverters: " + str(len(self.inverters))
-        
+    
+    def createInverters(self, stationData):
+        for inverter in stationData["inverters"]:
+            self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
+            Domoticz.Debug("inverter created: '" + str(inverter['sn']) + "'")
+            self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
+  
     @property
     def id(self):
         return self._id
@@ -192,6 +210,10 @@ class PowerStation:
     def name(self):
         return self._name
         
+    @property
+    def numInverters(self):
+        return len(self.inverters)
+
     @property
     def firstFreeDeviceNum(self):
         return self._firstDevice
@@ -206,6 +228,11 @@ class PowerStation:
         return _maxDeviceNum
 
 class GoodWe:
+    """
+    A class to describe the methods and properties of a GoodWe account.
+    An account consists of 1 or more power stations.
+    """
+
     tokenAvailable = False
     Address = ""
     Port = ""
@@ -233,14 +260,15 @@ class GoodWe:
         return
 
     @property
-    def numInverters(self):
+    def numStations(self):
         return len(self.powerStationList)
         
     def createStation(self, key, stationData):
         #for key, station in enumerate(apiData["list"]):
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({key : powerStation})
-        Domoticz.Log("PowerStation found: " + powerStation.id)
+        Domoticz.Log("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
+        
     
     def apiRequestHeaders(self):
         Domoticz.Debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
@@ -277,7 +305,7 @@ class GoodWe:
         }
 
     def stationDataRequest(self, stationIndex):
-        Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numInverters) + "' for PS index: '" + str(stationIndex) + "'")
+        Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numStations) + "' for PS index: '" + str(stationIndex) + "'")
         #powerStation = self.powerStationList[self.powerStationIndex]
         powerStation = self.powerStationList[stationIndex]
         return {

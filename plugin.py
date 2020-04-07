@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.4" author="dylian94">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.5" author="dylian94">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -88,29 +88,10 @@ class GoodWeSEMSPlugin:
     httpConn = None
     runAgain = 6
     devicesUpdated = False
-    goodWeInverter = None
+    goodWeAccount = None
     
     baseDeviceIndex = 0
     maxDeviceIndex = 0
-
-    # inverterTemperatureUnit = 1
-    # inverterStateUnit = 9
-    # outputCurrentUnit = 2
-    # outputVoltageUnit = 3
-    # outputPowerUnit = 4
-    # inputVoltage1Unit = 5
-    # inputAmps1Unit = 6
-    # inputPower1Unit = 14
-    # inputPower2Unit = 15
-    # inputPower3Unit = 16
-    # inputPower4Unit = 17
-    # inputVoltage2Unit = 7
-    # inputVoltage3Unit = 10
-    # inputVoltage4Unit = 12
-    # inputAmps2Unit = 8
-    # inputAmps3Unit = 11
-    # inputAmps4Unit = 13
-        
 
     def __init__(self):
         return
@@ -124,20 +105,19 @@ class GoodWeSEMSPlugin:
                                        Address=Parameters["Address"], Port=Parameters["Port"])
 
     def startDeviceUpdate(self, Connection):
-        Domoticz.Debug("startDeviceUpdate, token availability: '" + str(self.goodWeInverter.tokenAvailable)+ "'")
-        if not self.goodWeInverter.tokenAvailable:
-            self.goodWeInverter.powerStationList = {}
-            self.goodWeInverter.powerStationIndex = 0
+        Domoticz.Debug("startDeviceUpdate, token availability: '" + str(self.goodWeAccount.tokenAvailable)+ "'")
+        if not self.goodWeAccount.tokenAvailable:
+            self.goodWeAccount.powerStationList = {}
+            self.goodWeAccount.powerStationIndex = 0
             self.devicesUpdated = False
-            Connection.Send(self.goodWeInverter.tokenRequest(Parameters["Username"], Parameters["Password"]))
+            Connection.Send(self.goodWeAccount.tokenRequest(Parameters["Username"], Parameters["Password"]))
         else:
-            if self.goodWeInverter.numInverters > 0:
-                Connection.Send(self.goodWeInverter.stationDataRequest(self.baseDeviceIndex))
+            if self.goodWeAccount.numStations > 0:
+                Connection.Send(self.goodWeAccount.stationDataRequest(self.baseDeviceIndex))
             else:
                 Domoticz.Log("request device update but no inverters found.")
                 self.httpConn.Disconnect()
                 self.httpConn = None
-
 
     def onStart(self):
         if Parameters["Mode6"] == "Verbose":
@@ -147,7 +127,7 @@ class GoodWeSEMSPlugin:
             Domoticz.Debugging(2)
             DumpConfigToLog()
 
-        self.goodWeInverter = GoodWe(Parameters["Address"], Parameters["Port"])
+        self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"])
         self.runAgain = int(Parameters["Mode2"])
 
         self.httpConn = self.apiConnection()
@@ -178,16 +158,16 @@ class GoodWeSEMSPlugin:
                 Domoticz.Debug("message received: CrossLogin")
                 if apiData == 'Null':
                     Domoticz.Log("SEMS API Token not received")
-                    self.goodWeInverter.tokenAvailable = False
+                    self.goodWeAccount.tokenAvailable = False
                     self.httpConn.Disconnect()
                     #self.httpConn = None
                 else:
                     Domoticz.Debug("message apiData: '" + str(apiData) + "'")
-                    self.goodWeInverter.token = apiData
-                    Domoticz.Debug("SEMS API Token: " + json.dumps(self.goodWeInverter.token))
-                    self.goodWeInverter.tokenAvailable = True
+                    self.goodWeAccount.token = apiData
+                    Domoticz.Debug("SEMS API Token: " + json.dumps(self.goodWeAccount.token))
+                    self.goodWeAccount.tokenAvailable = True
                     #request list of stations on this account
-                    Connection.Send(self.goodWeInverter.stationListRequest())
+                    Connection.Send(self.goodWeAccount.stationListRequest())
 
             elif "/api/v2/HistoryData/QueryPowerStationByHistory" in apiUrl:
                 Domoticz.Debug("message received: QueryPowerStationByHistory")
@@ -203,23 +183,23 @@ class GoodWeSEMSPlugin:
                     for key, station in enumerate(apiData["list"]):
                         if len(Parameters["Mode1"]) <= 0 or (len(Parameters["Mode1"]) > 0 and station["id"] == Parameters["Mode1"]):
                             #add all found stations if no ID entered, else only log the one that matches the ID
-                            self.goodWeInverter.createStation(key, station)
+                            self.goodWeAccount.createStation(key, station)
                             Domoticz.Log("Station found: " + station["id"])
 
-                    Connection.Send(self.goodWeInverter.stationDataRequest(self.baseDeviceIndex))
+                    Connection.Send(self.goodWeAccount.stationDataRequest(self.baseDeviceIndex))
 
             elif "api/v2/PowerStation/GetMonitorDetailByPowerstationId" in apiUrl:
                 Domoticz.Debug("message received: GetMonitorDetailByPowerstationId")
                 #Domoticz.Debug("message: '" + apiData + "'")
                 if apiData is None or len(apiData) == 0:
-                    Domoticz.Error("No station data received from GoodWe SEMS API (Station ID: " + str(self.goodWeInverter.powerStationList[
-                        self.goodWeInverter.powerStationIndex]) + ")")
-                    self.goodWeInverter.tokenAvailable = False
+                    Domoticz.Error("No station data received from GoodWe SEMS API (Station ID: " + str(self.goodWeAccount.powerStationList[
+                        self.goodWeAccount.powerStationIndex]) + ")")
+                    self.goodWeAccount.tokenAvailable = False
                 else:
                     #Domoticz.Debug("message apiData: '" + str(apiData) + "'")
-                    Domoticz.Log("Station data received from GoodWe SEMS API ('" + str(self.goodWeInverter.powerStationList[
-                        self.goodWeInverter.powerStationIndex]) + "', index : '" + str(self.goodWeInverter.powerStationIndex)+ "')")
-                    theStation = self.goodWeInverter.powerStationList[self.goodWeInverter.powerStationIndex]
+                    Domoticz.Log("Station data received from GoodWe SEMS API ('" + str(self.goodWeAccount.powerStationList[
+                        self.goodWeAccount.powerStationIndex]) + "', index : '" + str(self.goodWeAccount.powerStationIndex)+ "')")
+                    theStation = self.goodWeAccount.powerStationList[self.goodWeAccount.powerStationIndex]
 
                     for inverter in apiData["inverter"]:
                         Domoticz.Debug("inverter found with SN: '" + inverter["sn"] + "'")
@@ -236,9 +216,9 @@ class GoodWeSEMSPlugin:
 
                             if len(inverter['fault_message']) > 0:
                                 Domoticz.Log("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
-                            Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + self.goodWeInverter.INVERTER_STATE[inverter["status"]] + "'")
+                            Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
                             Devices[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
-                            if self.goodWeInverter.INVERTER_STATE[inverter["status"]] == 'generating':
+                            if self.goodWeAccount.INVERTER_STATE[inverter["status"]] == 'generating':
                                 Domoticz.Debug("inverter generating, log temp")
                                 UpdateDevice(theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
                                 UpdateDevice(theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
@@ -276,19 +256,19 @@ class GoodWeSEMSPlugin:
                         else:
                             Domoticz.Log("Unknown inverter found with S/N: '" + inverter["sn"] +"'.")
 
-                if self.goodWeInverter.powerStationIndex == (len(self.goodWeInverter.powerStationList) - 1):
+                if self.goodWeAccount.powerStationIndex == (len(self.goodWeAccount.powerStationList) - 1):
                     Domoticz.Debug("Last station of list found")
                     if self.runAgain > 2:
                         Domoticz.Log("Next active heartbeat far away, disconnecting and dropping connection.")
                         self.httpConn.Disconnect()
                         #self.httpConn = None
 
-                    #Domoticz.Log("Updated " + str(len(Devices)) + " device(s) for " + str(len(self.goodWeInverter.powerStationList)) + " station(s) with " + str(int(self.baseDeviceIndex / self.maxDeviceIndex)) + " inverter(s)")
+                    #Domoticz.Log("Updated " + str(len(Devices)) + " device(s) for " + str(len(self.goodWeAccount.powerStationList)) + " station(s) with " + str(int(self.baseDeviceIndex / self.maxDeviceIndex)) + " inverter(s)")
                     self.devicesUpdated = True
                 else:
-                    Domoticz.Debug("Retrieving next station data (ID: " + self.goodWeInverter.powerStationList[self.baseDeviceIndex] + ")")
+                    Domoticz.Debug("Retrieving next station data (ID: " + self.goodWeAccount.powerStationList[self.baseDeviceIndex] + ")")
                     self.baseDeviceIndex += 1
-                    Connection.Send(self.goodWeInverter.stationDataRequest(self.baseDeviceIndex))
+                    Connection.Send(self.goodWeAccount.stationDataRequest(self.baseDeviceIndex))
 
         elif status == 302:
             Domoticz.Error("GoodWe SEMS API returned a Page Moved Error.")
