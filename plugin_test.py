@@ -54,7 +54,9 @@ class PowerStationTest(unittest.TestCase):
         self.assertEqual(self.powerStationDouble.id, 'a73d66f6-aa49-428e-9f93-bdd781f04b7d', msg="Double PS ID fail")
         self.assertEqual(self.powerStationDouble.name, 'pw_name_2', msg="Double PS name fail")
         self.assertEqual(self.powerStationDouble.numInverters, 2, msg="Double PS num inv fail: " + str(self.powerStationDouble.numInverters))
-        
+
+    #def test_doublePowerStation(self):
+ 
     def tearDown(self):
         print("tearing down the house")
         self.powerStationSingle = None
