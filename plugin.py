@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.5" author="dylian94">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="1.2.6" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -150,9 +150,17 @@ class GoodWeSEMSPlugin:
         status = int(Data["Status"])
 
         if status == 200:
-            apiRresponse = json.loads(responseText)
-            apiUrl = apiRresponse["components"]["api"]
-            apiData = apiRresponse["data"]
+            apiUrl = ""
+            try:
+                #apiResponse sometimes contains invalid data, catch the exception
+                apiResponse = json.loads(responseText)
+                apiUrl = apiResponse["components"]["api"]
+                apiData = apiResponse["data"]
+            except JSONDecodeError as err:
+                msg, doc, pos = err.args
+                Domoticz.Error(msg)
+                apiResponse = None
+                Domoticz.Debug("The faulty message: '" + doc)
 
             if "api/v2/Common/CrossLogin" in apiUrl:
                 Domoticz.Debug("message received: CrossLogin")
