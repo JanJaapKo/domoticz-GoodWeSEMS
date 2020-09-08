@@ -156,7 +156,7 @@ class GoodWeSEMSPlugin:
                 apiResponse = json.loads(responseText)
                 apiUrl = apiResponse["components"]["api"]
                 apiData = apiResponse["data"]
-            except JSONDecodeError as err:
+            except json.JSONDecodeError as err:
                 msg, doc, pos = err.args
                 Domoticz.Error(msg)
                 apiResponse = None
