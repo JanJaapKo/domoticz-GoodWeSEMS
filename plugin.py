@@ -224,7 +224,7 @@ class GoodWeSEMSPlugin:
 
                             if len(inverter['fault_message']) > 0:
                                 Domoticz.Log("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
-                            Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
+                            Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
                             Devices[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
                             if self.goodWeAccount.INVERTER_STATE[inverter["status"]] == 'generating':
                                 Domoticz.Debug("inverter generating, log temp")

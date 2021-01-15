@@ -110,7 +110,7 @@ class Inverter:
                             
         if self.inverterStateUnit not in Devices:
             Options = {"LevelActions": "||",
-                  "LevelNames": "|Offline|Waiting|Generating",
+                  "LevelNames": "|Offline|Waiting|Generating|Error",
                   "LevelOffHidden": "true",
                   "SelectorStyle": "1"}
             Domoticz.Device(Name="Inverter state (SN: " + self.serialNumber + ")",
@@ -248,7 +248,8 @@ class GoodWe:
     INVERTER_STATE = {
         -1: 'offline',
         0: 'waiting',
-        1: 'generating'
+        1: 'generating',
+        2: 'error'
     }
 
     powerStationList = {}
