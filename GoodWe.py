@@ -25,6 +25,7 @@
 # string: a series of solar panels connected to 1 input of the inverter
 
 import json
+import requests
 try:
 	import Domoticz
 	debug = False
@@ -56,6 +57,7 @@ class Inverter:
     inputAmps3Unit = 11
     inputAmps4Unit = 13
     outputFreq1Unit = 18
+    inputPowerTest = 19
 
     def __init__(self, inverterData, startNum):
         self._sn = inverterData["sn"]
@@ -68,6 +70,7 @@ class Inverter:
         self.inputVoltage1Unit = 5 + startNum
         self.inputAmps1Unit = 6 + startNum
         self.inputPower1Unit = 14 + startNum
+        self.inputPowerTest = 19 + startNum
         self.inputPower2Unit = 15 + startNum
         self.inputPower3Unit = 16 + startNum
         self.inputPower4Unit = 17 + startNum
@@ -109,7 +112,7 @@ class Inverter:
                             Switchtype=4, Used=1).Create()
                             
         if self.inverterStateUnit not in Devices:
-            Options = {"LevelActions": "||",
+            Options = {"LevelActions": "|||",
                   "LevelNames": "|Offline|Waiting|Generating|Error",
                   "LevelOffHidden": "true",
                   "SelectorStyle": "1"}
@@ -127,6 +130,10 @@ class Inverter:
         if self.inputPower1Unit not in Devices:
             Domoticz.Device(Name="Inverter input 1 power (SN: " + self.serialNumber + ")",
                             Unit=(self.inputPower1Unit), Type=243, Subtype=29,
+                            Switchtype=4, Used=1).Create()
+        if self.inputPowerTest not in Devices:
+            Domoticz.Device(Name="Inverter input test power (SN: " + self.serialNumber + ")",
+                            Unit=(self.inputPowerTest), Type=243, Subtype=29,
                             Switchtype=4, Used=1).Create()
         if self.inputVoltage2Unit not in Devices:
             Domoticz.Device(Name="Inverter input 2 voltage (SN: " + self.serialNumber + ")",
@@ -181,23 +188,35 @@ class PowerStation:
     inverters = None
     _firstDevice = 0
     
+    # def __init__(self, stationData=None, id=None, firstDevice=0):
+        # self.inverters = {}
+        # if stationData is None:
+            # self._id = id
+        # else:
+            # self._firstDevice = firstDevice
+            # self._name = stationData["pw_name"]
+            # self._address = stationData["pw_address"]
+            # self._id = stationData["id"]
+            # Domoticz.Debug("create station with id: '" + stationData["id"] + "' and inverters: " + str(len(stationData["inverters"])) )
+            # self.createInverters(stationData)
+
     def __init__(self, stationData=None, id=None, firstDevice=0):
         self.inverters = {}
         if stationData is None:
             self._id = id
         else:
             self._firstDevice = firstDevice
-            self._name = stationData["pw_name"]
-            self._address = stationData["pw_address"]
-            self._id = stationData["id"]
-            Domoticz.Debug("create station with id: '" + stationData["id"] + "' and inverters: " + str(len(stationData["inverters"])) )
-            self.createInverters(stationData)
+            self._name = stationData["info"]["stationname"]
+            self._address = stationData["info"]["address"]
+            self._id = stationData["info"]["powerstation_id"]
+            Domoticz.Debug("create station with id: '" + self._id + "' and inverters: " + str(len(stationData["inverter"])) )
+            self.createInverters(stationData["inverter"])
             
     def __repr__(self):
         return "Station ID: '" + self._id + "', name: '" + self._name + "', inverters: " + str(len(self.inverters))
     
-    def createInverters(self, stationData):
-        for inverter in stationData["inverters"]:
+    def createInverters(self, inverterData):
+        for inverter in inverterData:
             self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
             Domoticz.Debug("inverter created: '" + str(inverter['sn']) + "'")
             self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
@@ -237,13 +256,10 @@ class GoodWe:
     Address = ""
     Port = ""
     token = {
-        "uid": "",
-        "timestamp": 0,
-        "token": "",
         "client": "web",
-        "version": "",
+        "version": "v3.1",
         "language": "en-GB"
-    }
+    } #default token, will be updated by tokenRequest()
 
     INVERTER_STATE = {
         -1: 'offline',
@@ -255,9 +271,12 @@ class GoodWe:
     powerStationList = {}
     powerStationIndex = 0
 
-    def __init__(self, Address, Port):
-        self.Address = Address
+    def __init__(self, Address, Port, User, Password):
+        self.Address = "https://" + Address + "/api"
         self.Port = Port
+        self.Username = User
+        self.Password = Password
+        self.base_url = self.Address
         return
 
     @property
@@ -269,6 +288,11 @@ class GoodWe:
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({key : powerStation})
         Domoticz.Log("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
+
+    def createStationV2(self, stationData):
+        powerStation = PowerStation(stationData=stationData)
+        self.powerStationList.update({1 : powerStation})
+        Domoticz.Log("PowerStation created: '" + powerStation.id + "'")
         
     
     def apiRequestHeaders(self):
@@ -277,33 +301,75 @@ class GoodWe:
             'Content-Type': 'application/json; charset=utf-8',
             'Connection': 'keep-alive',
             'Accept': 'Content-Type: application/json; charset=UTF-8',
-            'Host': self.Address + ":" + self.Port,
+            'Host': self.base_url + ":" + self.Port,
             'User-Agent': 'Domoticz/1.0',
             'token': json.dumps(self.token)
         }
 
-    def tokenRequest(self, Username, Password):
-        Domoticz.Debug("build tokenRequest with UN: '" + Username + "', pwd: '" + Password +"'")
+    def apiRequestHeadersV2(self):
+        Domoticz.Debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
         return {
-            'Verb': 'POST',
-            'URL': '/api/v2/Common/CrossLogin',
-            'Data': json.dumps({
-                "account": Username,
-                "pwd": Password,
-                "is_local": True,
-                "agreement_agreement": 1
-            }),
-            'Headers': self.apiRequestHeaders()
+            'User-Agent': 'Domoticz/1.0',
+            'token': json.dumps(self.token)
         }
+
+    def tokenRequest(self):
+        Domoticz.Debug("build tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password +"'")
+        url = '/v2/Common/CrossLogin'
+        loginPayload = {
+            'account': self.Username,
+            'pwd': self.Password,
+        }
+
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=10)
+        #r.raise_for_status()
+        Domoticz.Debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
+        apiResponse = r.json()
+        if 'api' not in apiResponse:
+            raise Exception(data['msg'])
+
+        apiUrl = apiResponse["components"]["api"]
+
+        if apiResponse == 'Null':
+            Domoticz.Log("SEMS API Token not received")
+            self.tokenAvailable = False
+        else:
+            self.token = apiResponse['data']
+            Domoticz.Debug("SEMS API Token received: " + json.dumps(self.token))
+            self.tokenAvailable = True
+            self.base_url = apiResponse['api']
+        
+        return r.status_code
+
+        # return {
+            # 'Verb': 'POST',
+            # 'URL': '/api/v2/Common/CrossLogin',
+            # 'Data': json.dumps({
+                # "account": self.Username,
+                # "pwd": self.Password,
+                # "is_local": True,
+                # "agreement_agreement": 1
+            # }),
+            # 'Headers': self.apiRequestHeaders()
+        # }
 
     def stationListRequest(self):
         Domoticz.Debug("build stationListRequest")
-        return {
-            'Verb': 'POST',
-            'URL': '/api/v2/HistoryData/QueryPowerStationByHistory',
-            'Data': '{}',
-            'Headers': self.apiRequestHeaders()
-        }
+        url = 'v2/HistoryData/QueryPowerStationByHistory'
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), timeout=10)
+ 
+        Domoticz.Debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
+        #Domoticz.Debug("building station list response: " + str(r.text))
+
+        return r.status_code
+
+
+        # return {
+            # 'Verb': 'POST',
+            # 'URL': '/api/v2/HistoryData/QueryPowerStationByHistory',
+            # 'Data': '{}',
+            # 'Headers': self.apiRequestHeaders()
+        # }
 
     def stationDataRequest(self, stationIndex):
         Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numStations) + "' for PS index: '" + str(stationIndex) + "'")
@@ -317,3 +383,17 @@ class GoodWe:
             }),
             'Headers': self.apiRequestHeaders()
         }
+
+    def stationDataRequestV2(self, stationId):
+        Domoticz.Debug("build stationDataRequest for 1 station: ")
+        url = 'v2/PowerStation/GetMonitorDetailByPowerstationId'
+        payload = {
+            'powerStationId' : stationId
+        }
+
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
+        Domoticz.Debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
+        #Domoticz.Debug("response station data request : " + json.dumps(r.json()))
+        responseData = r.json()
+        return responseData["data"]
+ 
