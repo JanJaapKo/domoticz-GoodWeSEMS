@@ -11,7 +11,7 @@ Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wik
 Login to a shell, go to the domoticz plugin directory and clone this repository:
 ```bash
 cd domoticz/plugins
-git clone https://github.com/janjaapko/domoticz-GoodWeSEMS.git
+git clone git@github.com:janjaapko/domoticz-GoodWeSEMS.git
 ```
 
 Restart Domoticz server, you can try one of these commands (on Linux):
@@ -28,8 +28,7 @@ Updating
 --------
 Login to a shell, go to the plugin directory inside the domoticz plugin directory and execute git pull:
 ```bash
-cd domoticz/plugins
-cd domoticz-GoodWeSEMS
+cd domoticz/plugins/domoticz-GoodWeSEMS
 git pull
 ```
 
@@ -41,7 +40,7 @@ for feature request or bug reports. If you DO know how to develop software pleas
 Current features
 ----------------
 1. Get all stations for a specific user account
-2. Automatically get data for all inverters (for one or all stations)
+2. Automatically get data for all inverters (for one station)
 3. The following devices are added to Domoticz for each inverter:
     - temperature: Inverter temperature (Celcius)
     - power: Current and total output power (Watts)
@@ -51,3 +50,7 @@ Current features
     - input strings: Voltage, current and power per string
 
 There is a lot more information available trough the GoodWe API if you would like to have a specific feature added to this plugin please submit an issue as indicated in the paragraph above. 
+
+Current limitations
+----------------
+You can only fetch data for 1 powerstation. The field Power Station ID is now mandatory
