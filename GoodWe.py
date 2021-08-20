@@ -26,6 +26,7 @@
 
 import json
 import requests
+import time
 try:
 	import Domoticz
 	debug = False
@@ -255,7 +256,8 @@ class GoodWe:
     tokenAvailable = False
     Address = ""
     Port = ""
-    token = {
+    token = ""
+    default_token = {
         "client": "web",
         "version": "v3.1",
         "language": "en-GB"
@@ -277,6 +279,7 @@ class GoodWe:
         self.Username = User
         self.Password = Password
         self.base_url = self.Address
+        self.token = self.default_token
         return
 
     @property
@@ -371,7 +374,7 @@ class GoodWe:
             # 'Headers': self.apiRequestHeaders()
         # }
 
-    def stationDataRequest(self, stationIndex):
+    def stationDataRequestV1(self, stationIndex):
         Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numStations) + "' for PS index: '" + str(stationIndex) + "'")
         #powerStation = self.powerStationList[self.powerStationIndex]
         powerStation = self.powerStationList[stationIndex]
@@ -385,7 +388,32 @@ class GoodWe:
         }
 
     def stationDataRequestV2(self, stationId):
-        Domoticz.Debug("build stationDataRequest for 1 station: ")
+        for i in range(1, 4):
+            try:
+                Domoticz.Debug("build stationDataRequest for 1 station, attempt: " + str(i))
+
+                responseData = self.stationDataRequest(stationId)
+                try:
+                    code = int(responseData['code'])
+                except ValueError:
+                    raise Exception("Failed to call GoodWe API (no code)")
+
+                if code == 0 and responseData['data'] is not None:
+                    #data successfully received
+                    return responseData['data']
+                elif code == 100001 or code == 100002:
+                    #token has expired or is not valid
+                    Domoticz.Debug("Failed to call GoodWe API (no valid token), will be refreshed")
+                    self.tokenRequest()
+                else:
+                    raise Exception("Failed to call GoodWe API (code {})".format(code))
+            except requests.exceptions.RequestException as exp:
+                Domoticz.Error(exp)
+            time.sleep(i ** 3)
+        else:
+            raise Exception("Failed to call GoodWe API (too many retries)")
+
+    def stationDataRequest(self, stationId):
         url = 'v2/PowerStation/GetMonitorDetailByPowerstationId'
         payload = {
             'powerStationId' : stationId
@@ -395,5 +423,4 @@ class GoodWe:
         Domoticz.Debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         #Domoticz.Debug("response station data request : " + json.dumps(r.json()))
         responseData = r.json()
-        return responseData["data"]
- 
+        return responseData

@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.1" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -198,8 +198,11 @@ class GoodWeSEMSPlugin:
         self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
         self.runAgain = int(Parameters["Mode2"])
 
-        #self.httpConn = self.apiConnection()
-        #self.httpConn.Connect()
+        if len(Parameters["Mode1"]) == 0:
+            Domoticz.Error("No Power Station ID provided, exiting")
+            #raise Exception("no Power Station ID provided")
+            return
+            
         self.startDeviceUpdateV2()
 
     def onStop(self):
@@ -379,6 +382,9 @@ class GoodWeSEMSPlugin:
     def onHeartbeat(self):
         if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
             Domoticz.Debug("onHeartbeat called, Connection is alive.")
+        elif len(Parameters["Mode1"]) == 0:
+            Domoticz.Error("No Power Station ID provided, exiting")
+            return
         else:
             self.runAgain = self.runAgain - 1
             if self.runAgain <= 0:
