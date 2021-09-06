@@ -17,33 +17,24 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.3" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.4" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
-        <h3>Devices</h3>
-        <ul style="list-style-type:square">
-            <li>temperature - Inverter temperature (Celcius)</li>
-            <li>state - operational state of the inverter</li>
-            <li>power - Current and total output power (Watts)</li>
-            <li>current - Output current (ampere)</li>
-            <li>voltage - Output Voltage</li>
-            <li>frequency - Output frquency [Hz]</li>
-            <li>inputs - Power/Current/Voltage per input string</li>
-        </ul>
         <h3>Configuration</h3>
         <ul>
             <li>Register your inverter at GoodWe SEMS portal (if not done already): <a href="https://www.semsportal.com">https://www.semsportal.com</a></li>
             <li>Choose one of the following options:</li>
             <ol type="a">
-                <li>Not possible at this moment: If you want all of your stations added to Domoticz you only have to enter your login information below</li>
-                <li>If you want to add one specific station to Domoticz follow the following steps:</li>
+                <li>You have to add one specific station to Domoticz follow the following steps:</li>
                 <ol>
                     <li>Login to your account on: <a href="https://www.semsportal.com">www.semsportal.com</a></li>
                     <li>Go to the plant status page for the station you want to add to Domoticz</li>
-                    <li>Get the station ID from the URL, this is the sequence of characters after: https://www.semsportal.com/PowerStation/PowerStatusSnMin/</li>
-                    <li>Add the station ID to the hardware configuration (mandatory)</li>
+                    <li>Get the station ID from the URL, this is the sequence of characters after: https://www.semsportal.com/PowerStation/PowerStatusSnMin/, in the pattern:
+                    (8 char)-(4 char)-(4 char)-(4 char)-(12 char), also known as a UUID </li>
+                    <li>Add the power station ID to the hardware configuration (mandatory)</li>
                 </ol>
+                <li>Not possible at this moment: If you want all of your stations added to Domoticz you only have to enter your login information below</li>
             </ol>
         </ul>
     </description>
