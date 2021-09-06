@@ -167,7 +167,12 @@ class GoodWeSEMSPlugin:
                 UpdateDevice(theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
                 UpdateDevice(theInverter.inputPower1Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                 #test to log cumulative counting
-                currentUsage,currentCount = Devices[theInverter.inputPowerTest].sValue.split(";") 
+                try:
+                    currentUsage,currentCount = Devices[theInverter.inputPowerTest].sValue.split(";") 
+                except:
+                    #in case no values there, just assume zero
+                    currentUsage = 0
+                    currentCount = 0
                 newCounter =  inputPower + float(currentCount) 
                 UpdateDevice(theInverter.inputPowerTest, 0, str(inputPower) + ";"  + str(newCounter), AlwaysUpdate=True)
                 Domoticz.Debug("test currentUsage, currentCount, newCounter = " + str(currentUsage) + ", " + str(currentCount) + ", " + str(newCounter))
