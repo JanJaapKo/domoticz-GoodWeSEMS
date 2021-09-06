@@ -27,6 +27,7 @@
 import json
 import requests
 import time
+import exceptions
 try:
 	import Domoticz
 	debug = False
@@ -396,22 +397,22 @@ class GoodWe:
                 try:
                     code = int(responseData['code'])
                 except ValueError:
-                    raise Exception("Failed to call GoodWe API (no code)")
+                    raise exceptions.FailureWithoutErrorCode
 
                 if code == 0 and responseData['data'] is not None:
                     #data successfully received
                     return responseData['data']
                 elif code == 100001 or code == 100002:
                     #token has expired or is not valid
-                    Domoticz.Debug("Failed to call GoodWe API (no valid token), will be refreshed")
+                    Domoticz.Log("Failed to call GoodWe API (no valid token), will be refreshed")
                     self.tokenRequest()
                 else:
-                    raise Exception("Failed to call GoodWe API (code {})".format(code))
+                    raise exceptions.FailureWithErrorCode(code)
             except requests.exceptions.RequestException as exp:
-                Domoticz.Error(exp)
+                Domoticz.Error("RequestException: " + str(exp))
             time.sleep(i ** 3)
         else:
-            raise Exception("Failed to call GoodWe API (too many retries)")
+            raise exceptions.TooManyRetries
 
     def stationDataRequest(self, stationId):
         url = 'v2/PowerStation/GetMonitorDetailByPowerstationId'

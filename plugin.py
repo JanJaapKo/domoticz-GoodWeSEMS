@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.1" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.2" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -83,6 +83,8 @@ import json
 import Domoticz
 from GoodWe import GoodWe
 from GoodWe import PowerStation
+import sys
+import exceptions
 
 class GoodWeSEMSPlugin:
     httpConn = None
@@ -128,7 +130,11 @@ class GoodWeSEMSPlugin:
             self.devicesUpdated = False
             self.goodWeAccount.tokenRequest()
         if self.goodWeAccount.tokenAvailable:
-            DeviceData = self.goodWeAccount.stationDataRequestV2(Parameters["Mode1"])
+            try:
+                DeviceData = self.goodWeAccount.stationDataRequestV2(Parameters["Mode1"])
+            except (exceptions.TooManyRetries, exceptions.FailureWithErrorCode, exceptions.FailureWithoutErrorCode) as exp:
+                Domoticz.Error("Failed to request data: " + str(exp))
+                return
             self.goodWeAccount.createStationV2(DeviceData)
             self.updateDevices(DeviceData)
 
