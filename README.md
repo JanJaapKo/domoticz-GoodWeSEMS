@@ -53,4 +53,9 @@ There is a lot more information available trough the GoodWe API if you would lik
 
 Current limitations
 ----------------
-You can only fetch data for 1 powerstation. The field Power Station ID is now mandatory
+1. You can only fetch data for 1 powerstation. The field Power Station ID is now mandatory
+2. The GoodWE API does not always respond in time, leading to errors like below. This is not a problem, data will be updated on the next try. 
+``` 
+Error: Zonnepanelen: (Zonnepanelen) RequestException: HTTPSConnectionPool(host='eu.semsportal.com', port=443): Read timed out. (read timeout=10)
+Error: Zonnepanelen: (Zonnepanelen) Failed to request data: Failed to call GoodWe API (too many retries)
+```
