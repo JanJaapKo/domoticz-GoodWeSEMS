@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.4" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.5" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -103,7 +103,6 @@ class GoodWeSEMSPlugin:
             self.goodWeAccount.powerStationList = {}
             self.goodWeAccount.powerStationIndex = 0
             self.devicesUpdated = False
-            #Connection.Send(self.goodWeAccount.tokenRequest(Parameters["Username"], Parameters["Password"]))
             self.goodWeAccount.tokenRequest()
         else:
             if self.goodWeAccount.numStations > 0:
@@ -135,7 +134,6 @@ class GoodWeSEMSPlugin:
             Domoticz.Debug("inverter found with SN: '" + inverter["sn"] + "'")
             if inverter["sn"] in theStation.inverters:
                 theStation.inverters[inverter["sn"]].createDevices(Devices)
-                #Domoticz.Debug("Details d in inverter: '" + str(inverter['d']) + "'")
                 
                 theInverter = theStation.inverters[inverter["sn"]]
 
@@ -202,7 +200,6 @@ class GoodWeSEMSPlugin:
 
         if len(Parameters["Mode1"]) == 0:
             Domoticz.Error("No Power Station ID provided, exiting")
-            #raise Exception("no Power Station ID provided")
             return
             
         self.startDeviceUpdateV2()
@@ -392,18 +389,11 @@ class GoodWeSEMSPlugin:
             if self.runAgain <= 0:
 
                 Domoticz.Debug("onHeartbeat called, starting device update.")
-                # if self.httpConn is None:
-                    # self.httpConn = self.apiConnection()
-
-                # if not self.httpConn.Connected():
-                    # self.httpConn.Connect()
-                # else:
                 self.startDeviceUpdateV2()
 
                 self.runAgain = int(Parameters["Mode2"])
             else:
                 Domoticz.Debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
-
 
 global _plugin
 _plugin = GoodWeSEMSPlugin()

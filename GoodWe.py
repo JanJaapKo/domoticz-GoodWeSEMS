@@ -396,7 +396,7 @@ class GoodWe:
                 responseData = self.stationDataRequest(stationId)
                 try:
                     code = int(responseData['code'])
-                except ValueError:
+                except (ValueError, KeyError):
                     raise exceptions.FailureWithoutErrorCode
 
                 if code == 0 and responseData['data'] is not None:
