@@ -59,7 +59,7 @@ class Inverter:
     inputAmps3Unit = 11
     inputAmps4Unit = 13
     outputFreq1Unit = 18
-    inputPowerTest = 19
+    #inputPowerTest = 19
 
     def __init__(self, inverterData, startNum):
         self._sn = inverterData["sn"]
@@ -72,7 +72,7 @@ class Inverter:
         self.inputVoltage1Unit = 5 + startNum
         self.inputAmps1Unit = 6 + startNum
         self.inputPower1Unit = 14 + startNum
-        self.inputPowerTest = 19 + startNum
+        #self.inputPowerTest = 19 + startNum
         self.inputPower2Unit = 15 + startNum
         self.inputPower3Unit = 16 + startNum
         self.inputPower4Unit = 17 + startNum
@@ -133,10 +133,10 @@ class Inverter:
             Domoticz.Device(Name="Inverter input 1 power (SN: " + self.serialNumber + ")",
                             Unit=(self.inputPower1Unit), Type=243, Subtype=29,
                             Switchtype=4, Used=1).Create()
-        if self.inputPowerTest not in Devices:
-            Domoticz.Device(Name="Inverter input test power (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputPowerTest), Type=243, Subtype=29,
-                            Switchtype=4, Used=1).Create()
+        # if self.inputPowerTest not in Devices:
+            # Domoticz.Device(Name="Inverter input test power (SN: " + self.serialNumber + ")",
+                            # Unit=(self.inputPowerTest), Type=243, Subtype=29,
+                            # Switchtype=4, Used=1).Create()
         if self.inputVoltage2Unit not in Devices:
             Domoticz.Device(Name="Inverter input 2 voltage (SN: " + self.serialNumber + ")",
                             Unit=(self.inputVoltage2Unit), Type=243, Subtype=8, Used=0).Create()
