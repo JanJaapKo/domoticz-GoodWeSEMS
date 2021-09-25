@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.5" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="2.0.7" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -52,12 +52,12 @@
         <param field="Mode1" label="Power Station ID (mandatory)" width="300px"/>
         <param field="Mode2" label="Refresh interval" width="75px">
             <options>
-                <option label="10s" value="1"/>
                 <option label="30s" value="3"/>
                 <option label="1m" value="6"/>
                 <option label="5m" value="30" default="true"/>
                 <option label="10m" value="60"/>
                 <option label="15m" value="90"/>
+                <option label="30m" value="180"/>
             </options>
         </param>
         <param field="Mode6" label="Log level" width="75px">
@@ -72,9 +72,10 @@
 """
 import json
 import Domoticz
+import sys, time
+from datetime import datetime, timedelta
 from GoodWe import GoodWe
 from GoodWe import PowerStation
-import sys
 import exceptions
 
 class GoodWeSEMSPlugin:
@@ -150,42 +151,44 @@ class GoodWeSEMSPlugin:
                 UpdateDevice(theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]), AlwaysUpdate=True)
                 UpdateDevice(theInverter.outputPowerUnit, 0, str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000), AlwaysUpdate=True)
                 inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
-                inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
+                inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1])) #calculate the power based on P = I * V in Watt
                 #Domoticz.Debug("power calc = V: '"+inputVoltage[:-1]+"', A: '"+inputAmps[:-1]+"', power: W: '" + str(inputPower) + "'")
                 UpdateDevice(theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
                 UpdateDevice(theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
-                UpdateDevice(theInverter.inputPower1Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
-                #test to log cumulative counting
-                try:
-                    currentUsage,currentCount = Devices[theInverter.inputPowerTest].sValue.split(";") 
-                except:
-                    #in case no values there, just assume zero
-                    currentUsage = 0
-                    currentCount = 0
-                newCounter =  inputPower + float(currentCount) 
-                UpdateDevice(theInverter.inputPowerTest, 0, str(inputPower) + ";"  + str(newCounter), AlwaysUpdate=True)
-                Domoticz.Debug("test currentUsage, currentCount, newCounter = " + str(currentUsage) + ", " + str(currentCount) + ", " + str(newCounter))
+
+                #newCounter = calculateNewEnergy(theInverter.inputPowerTest, 600)
+                #UpdateDevice(theInverter.inputPowerTest, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+
+                newCounter = calculateNewEnergy(theInverter.inputPower1Unit, inputPower)
+                UpdateDevice(theInverter.inputPower1Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+
                 if "pv_input_2" in inverter:
                     Domoticz.Debug("Second string found")
                     inputVoltage,inputAmps = inverter["pv_input_2"].split('/')
                     UpdateDevice(theInverter.inputVoltage2Unit, 0, inputVoltage, AlwaysUpdate=True)
                     UpdateDevice(theInverter.inputAmps2Unit, 0, inputAmps, AlwaysUpdate=True)
                     inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
-                    UpdateDevice(theInverter.inputPower2Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(theInverter.inputPower2Unit, inputPower)
+                    UpdateDevice(theInverter.inputPower2Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    #UpdateDevice(theInverter.inputPower2Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                 if "pv_input_3" in inverter:
                     Domoticz.Debug("Third string found")
                     inputVoltage,inputAmps = inverter["pv_input_3"].split('/')
                     UpdateDevice(theInverter.inputVoltage3Unit, 0, inputVoltage, AlwaysUpdate=True)
                     UpdateDevice(theInverter.inputAmps3Unit, 0, inputAmps, AlwaysUpdate=True)
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                    UpdateDevice(theInverter.inputPower3Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(theInverter.inputPower3Unit, inputPower)
+                    UpdateDevice(theInverter.inputPower3Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    #UpdateDevice(theInverter.inputPower3Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                 if "pv_input_4" in inverter:
                     Domoticz.Debug("Fourth string found")
                     inputVoltage,inputAmps = inverter["pv_input_4"].split('/')
                     UpdateDevice(theInverter.inputVoltage4Unit, 0, inputVoltage, AlwaysUpdate=True)
                     UpdateDevice(theInverter.inputAmps4Unit, 0, inputAmps, AlwaysUpdate=True)
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                    UpdateDevice(theInverter.inputPower4Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(theInverter.inputPower4Unit, inputPower)
+                    UpdateDevice(theInverter.inputPower4Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    #UpdateDevice(theInverter.inputPower4Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
 
     def onStart(self):
         if Parameters["Mode6"] == "Verbose":
@@ -320,10 +323,10 @@ class GoodWeSEMSPlugin:
                             UpdateDevice(theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
                             UpdateDevice(theInverter.inputPower1Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                             #test to log cumulative counting
-                            currentUsage,currentCount = Devices[theInverter.inputPowerTest].sValue.split(";") 
+                            previousPower,currentCount = Devices[theInverter.inputPowerTest].sValue.split(";") 
                             newCounter =  inputPower + float(currentCount) 
                             UpdateDevice(theInverter.inputPowerTest, 0, str(inputPower) + ";"  + str(newCounter), AlwaysUpdate=True)
-                            Domoticz.Debug("test currentUsage, currentCount, newCounter = " + str(currentUsage) + ", " + str(currentCount) + ", " + str(newCounter))
+                            Domoticz.Debug("test previousPower, currentCount, newCounter = " + str(previousPower) + ", " + str(currentCount) + ", " + str(newCounter))
                             if "pv_input_2" in inverter:
                                 Domoticz.Debug("Second string found")
                                 inputVoltage,inputAmps = inverter["pv_input_2"].split('/')
@@ -397,6 +400,26 @@ class GoodWeSEMSPlugin:
 
 global _plugin
 _plugin = GoodWeSEMSPlugin()
+
+def calculateNewEnergy(Unit, inputPower):
+    try:
+        #read power currently on display (comes from previous update) in Watt and energy counter uptill now in Wh
+        previousPower,currentCount = Devices[Unit].sValue.split(";") 
+    except:
+        #in case no values there, just assume zero
+        previousPower = 0 #Watt
+        currentCount = 0 #Wh
+    dt_format = "%Y-%m-%d %H:%M:%S"
+    dt_string = Devices[Unit].LastUpdate
+    lastUpdateDT = datetime.fromtimestamp(time.mktime(time.strptime(dt_string, dt_format)))
+    elapsedTime = datetime.now() - lastUpdateDT
+    Domoticz.Debug("Test power, previousPower: {}, last update: {:%Y-%m-%d %H:%M}, elapsedTime: {}, elapsedSeconds: {:6.2f}".format(previousPower, lastUpdateDT, elapsedTime, elapsedTime.total_seconds()))
+    
+    #average current and previous power (Watt) and multiply by elapsed time (hour) to get Watt hour
+    newCount = round(((float(previousPower) + inputPower ) / 2) * elapsedTime.total_seconds()/3600,2)
+    newCounter = newCount + float(currentCount) #add the amount of energy since last update to the already logged energy
+    Domoticz.Debug("Test power, previousPower: {}, currentCount: {:6.2f}, newCounter: {:6.2f}, added: {:6.2f}".format(previousPower, float(currentCount), newCounter, newCount))
+    return newCounter
 
 def UpdateDevice(Unit, nValue, sValue, BatteryLevel=255, AlwaysUpdate=False):
     if Unit not in Devices: return

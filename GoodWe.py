@@ -325,7 +325,7 @@ class GoodWe:
             'pwd': self.Password,
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=10)
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=5)
         #r.raise_for_status()
         Domoticz.Debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         apiResponse = r.json()
@@ -360,20 +360,11 @@ class GoodWe:
     def stationListRequest(self):
         Domoticz.Debug("build stationListRequest")
         url = 'v2/HistoryData/QueryPowerStationByHistory'
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), timeout=10)
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), timeout=5)
  
         Domoticz.Debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        #Domoticz.Debug("building station list response: " + str(r.text))
 
         return r.status_code
-
-
-        # return {
-            # 'Verb': 'POST',
-            # 'URL': '/api/v2/HistoryData/QueryPowerStationByHistory',
-            # 'Data': '{}',
-            # 'Headers': self.apiRequestHeaders()
-        # }
 
     def stationDataRequestV1(self, stationIndex):
         Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numStations) + "' for PS index: '" + str(stationIndex) + "'")
@@ -420,7 +411,7 @@ class GoodWe:
             'powerStationId' : stationId
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=5)
         Domoticz.Debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         #Domoticz.Debug("response station data request : " + json.dumps(r.json()))
         responseData = r.json()
