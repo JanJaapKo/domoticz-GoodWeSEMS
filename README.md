@@ -8,10 +8,16 @@ Installation and setup
 ----------------------
 Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wiki/Using_Python_plugins).
 
-Login to a shell, go to the domoticz plugin directory and clone this repository:
+Login to a shell, go to the domoticz plugin directory and clone this repository (eith SSH, requires git account):
 ```bash
 cd domoticz/plugins
 git clone git@github.com:janjaapko/domoticz-GoodWeSEMS.git
+```
+
+Login to a shell, go to the domoticz plugin directory and clone this repository (with https, requires no git account):
+```bash
+cd domoticz/plugins
+git clone https://github.com/JanJaapKo/domoticz-GoodWeSEMS.git
 ```
 
 Restart Domoticz server, you can try one of these commands (on Linux):
