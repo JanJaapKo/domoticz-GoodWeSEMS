@@ -16,6 +16,17 @@ class TooManyRetries(GoodweException):
         self.message = "Failed to call GoodWe API (too many retries)"
         super().__init__(self.message)
 
+class FailureWithMessage(GoodweException):
+    """Too many retries to call API"""
+    def __init__(self, code):
+        self.message = "Failed to call GoodWe API (return message = {})".format(code)
+        super().__init__(self.message)
+
+class FailureWithoutMessage(GoodweException):
+    """Too many retries to call API"""
+    def __init__(self):
+        self.message = "Failed to call GoodWe API (no return message )"
+        super().__init__(self.message)
 
 class FailureWithErrorCode(GoodweException):
     """Too many retries to call API"""

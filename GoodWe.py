@@ -329,8 +329,12 @@ class GoodWe:
         #r.raise_for_status()
         Domoticz.Debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         apiResponse = r.json()
-        if 'api' not in apiResponse:
-            raise Exception(data['msg'])
+        if apiResponse["code"] == 100005:
+            raise exceptions.GoodweException("invalid password or username")
+        if 'api' not in apiResponse and 'msg' in apiResponse:
+            raise exceptions.FailureWithMessage(apiResponse['msg'])
+        if 'api' not in apiResponse and 'msg' not in apiResponse:
+            raise exceptions.FailureWithoutMessage(apiResponse['msg'])
 
         apiUrl = apiResponse["components"]["api"]
 

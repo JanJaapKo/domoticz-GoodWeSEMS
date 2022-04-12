@@ -98,28 +98,18 @@ class GoodWeSEMSPlugin:
             return Domoticz.Connection(Name="SEMS Portal API", Transport="TCP/IP", Protocol="HTTP",
                                        Address=Parameters["Address"], Port=Parameters["Port"])
 
-    def startDeviceUpdate(self, Connection):
-        Domoticz.Debug("startDeviceUpdate, token availability: '" + str(self.goodWeAccount.tokenAvailable)+ "'")
-        if not self.goodWeAccount.tokenAvailable:
-            self.goodWeAccount.powerStationList = {}
-            self.goodWeAccount.powerStationIndex = 0
-            self.devicesUpdated = False
-            self.goodWeAccount.tokenRequest()
-        else:
-            if self.goodWeAccount.numStations > 0:
-                Connection.Send(self.goodWeAccount.stationDataRequest(self.baseDeviceIndex))
-            else:
-                Domoticz.Log("request device update but no inverters found.")
-                self.httpConn.Disconnect()
-                self.httpConn = None
-
     def startDeviceUpdateV2(self):
         Domoticz.Debug("startDeviceUpdate, token availability: '" + str(self.goodWeAccount.tokenAvailable)+ "'")
         if not self.goodWeAccount.tokenAvailable:
             self.goodWeAccount.powerStationList = {}
             self.goodWeAccount.powerStationIndex = 0
             self.devicesUpdated = False
-            self.goodWeAccount.tokenRequest()
+            try:
+                self.goodWeAccount.tokenRequest()
+            except (exceptions.GoodweException, exceptions.FailureWithMessage, exceptions.FailureWithoutMessage) as exp:
+                Domoticz.Error("Failed to request data: " + str(exp))
+                return
+            
         if self.goodWeAccount.tokenAvailable:
             try:
                 DeviceData = self.goodWeAccount.stationDataRequestV2(Parameters["Mode1"])
@@ -152,12 +142,8 @@ class GoodWeSEMSPlugin:
                 UpdateDevice(theInverter.outputPowerUnit, 0, str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000), AlwaysUpdate=True)
                 inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
                 inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1])) #calculate the power based on P = I * V in Watt
-                #Domoticz.Debug("power calc = V: '"+inputVoltage[:-1]+"', A: '"+inputAmps[:-1]+"', power: W: '" + str(inputPower) + "'")
                 UpdateDevice(theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
                 UpdateDevice(theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
-
-                #newCounter = calculateNewEnergy(theInverter.inputPowerTest, 600)
-                #UpdateDevice(theInverter.inputPowerTest, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
 
                 newCounter = calculateNewEnergy(theInverter.inputPower1Unit, inputPower)
                 UpdateDevice(theInverter.inputPower1Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
@@ -170,7 +156,6 @@ class GoodWeSEMSPlugin:
                     inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
                     newCounter = calculateNewEnergy(theInverter.inputPower2Unit, inputPower)
                     UpdateDevice(theInverter.inputPower2Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
-                    #UpdateDevice(theInverter.inputPower2Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                 if "pv_input_3" in inverter:
                     Domoticz.Debug("Third string found")
                     inputVoltage,inputAmps = inverter["pv_input_3"].split('/')
@@ -179,7 +164,6 @@ class GoodWeSEMSPlugin:
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
                     newCounter = calculateNewEnergy(theInverter.inputPower3Unit, inputPower)
                     UpdateDevice(theInverter.inputPower3Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
-                    #UpdateDevice(theInverter.inputPower3Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
                 if "pv_input_4" in inverter:
                     Domoticz.Debug("Fourth string found")
                     inputVoltage,inputAmps = inverter["pv_input_4"].split('/')
@@ -188,7 +172,6 @@ class GoodWeSEMSPlugin:
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
                     newCounter = calculateNewEnergy(theInverter.inputPower4Unit, inputPower)
                     UpdateDevice(theInverter.inputPower4Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
-                    #UpdateDevice(theInverter.inputPower4Unit, 0, str(inputPower) + ";0", AlwaysUpdate=True)
 
     def onStart(self):
         if Parameters["Mode6"] == "Verbose":
