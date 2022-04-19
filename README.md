@@ -6,7 +6,7 @@ This plugin was created by Dylian94 ([/dylian94/domoticz-GoodWeSEMS](https://git
 
 Installation and setup
 ----------------------
-Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wiki/Using_Python_plugins).
+Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wiki/Using_Python_plugins). Check limitations on the bottom of the page.
 
 Login to a shell, go to the domoticz plugin directory and clone this repository (eith SSH, requires git account):
 ```bash
