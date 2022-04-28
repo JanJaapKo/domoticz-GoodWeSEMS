@@ -84,6 +84,7 @@ class GoodWeSEMSPlugin:
     runAgain = 6
     devicesUpdated = False
     goodWeAccount = None
+    logger = None    
     
     baseDeviceIndex = 0
     maxDeviceIndex = 0
@@ -180,16 +181,17 @@ class GoodWeSEMSPlugin:
                     UpdateDevice(theInverter.inputPower4Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
 
     def onStart(self):
+        self.logger = logging.getLogger('root')
         if Parameters["Mode6"] == "Verbose":
             Domoticz.Debugging(1)
-            DumpConfigToLog()
             logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename=self.log_filename,level=logging.DEBUG)
             Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
+            DumpConfigToLog()
         elif Parameters["Mode6"] == "Debug":
             Domoticz.Debugging(2)
-            DumpConfigToLog()
             logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename=self.log_filename,level=logging.DEBUG)
             Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
+            DumpConfigToLog()
         else:
             Domoticz.Status("Starting Goodwe SEMS API plugin, logging to Domoticz")
         
@@ -486,17 +488,13 @@ def LogMessage(Message):
         logging.info("File written")
 
 def DumpConfigToLog():
+    Domoticz.Debug("Parameters count: " + str(len(Parameters)))
     for x in Parameters:
         if Parameters[x] != "":
-            logging.debug("'" + x + "':'" + str(Parameters[x]) + "'")
-    logging.debug("Device count: " + str(len(Devices)))
+            Domoticz.Debug("Parameter: '" + x + "':'" + str(Parameters[x]) + "'")
+    Domoticz.Debug("Device count: " + str(len(Devices)))
     for x in Devices:
-        logging.debug("Device:           " + str(x) + " - " + str(Devices[x]))
-        logging.debug("Device ID:       '" + str(Devices[x].ID) + "'")
-        logging.debug("Device Name:     '" + Devices[x].Name + "'")
-        logging.debug("Device nValue:    " + str(Devices[x].nValue))
-        logging.debug("Device sValue:   '" + Devices[x].sValue + "'")
-        logging.debug("Device LastLevel: " + str(Devices[x].LastLevel))
+        Domoticz.Debug("Device:           " + str(x) + " - " + str(Devices[x]))
     return
 
 def DumpHTTPResponseToLog(httpDict):
