@@ -2,6 +2,7 @@ import unittest
 from GoodWe import GoodWe
 from GoodWe import PowerStation
 from GoodWe import Inverter
+import logging
 
 
 class BasicInverterTest(unittest.TestCase):
@@ -37,6 +38,7 @@ class PowerStationTest(unittest.TestCase):
 
     def setUp(self):
         print("starting the test")
+        logging.info("starting the test")
 
     def test_starting_out(self):
         self.assertEqual(1, 1)
@@ -74,6 +76,7 @@ class PowerStationTest(unittest.TestCase):
             stationData=self.powerStationApiDataSingle
         )
         print("Created power station: '" + str(self.powerStationSingle) + "'")
+        logging.info("Created power station: '" + str(self.powerStationSingle) + "'")
         self.assertEqual(
             self.powerStationSingle.id,
             "a73d66f6-aa49-428e-9f93-bdd781f04b7e",
@@ -120,6 +123,7 @@ class PowerStationTest(unittest.TestCase):
         self.powerStationDouble = PowerStation(
             stationData=self.powerStationApiDataDouble
         )
+        logging.info("Created power station: '" + str(self.powerStationDouble) + "'")
         print("Created power station: '" + str(self.powerStationDouble) + "'")
         self.assertEqual(
             self.powerStationDouble.id,
@@ -138,6 +142,7 @@ class PowerStationTest(unittest.TestCase):
     # def test_doublePowerStation(self):
 
     def tearDown(self):
+        logging.info("tearing down the house")
         print("tearing down the house")
         self.powerStationSingle = None
         self.powerStationDouble = None
@@ -145,6 +150,7 @@ class PowerStationTest(unittest.TestCase):
 
 
 def main():
+    logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename="goodwe_test.log",level=logging.DEBUG)
     unittest.main()
 
 
