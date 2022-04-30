@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="3.0.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="3.0.1" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -179,6 +179,9 @@ class GoodWeSEMSPlugin:
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
                     newCounter = calculateNewEnergy(theInverter.inputPower4Unit, inputPower)
                     UpdateDevice(theInverter.inputPower4Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                #log data of battery
+                Domoticz.Debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
+                logging.debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
 
     def onStart(self):
         self.logger = logging.getLogger('root')

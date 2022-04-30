@@ -122,7 +122,7 @@ class Inverter:
                   "SelectorStyle": "1"}
             Domoticz.Device(Name="Inverter state (SN: " + self.serialNumber + ")",
                             Unit=(self.inverterStateUnit), TypeName="Selector Switch", Image=1,
-                            Options=Options).Create()
+                            Options=Options, Used=1).Create()
                             
         if self.inputVoltage1Unit not in Devices:
             Domoticz.Device(Name="Inverter input 1 voltage (SN: " + self.serialNumber + ")",
