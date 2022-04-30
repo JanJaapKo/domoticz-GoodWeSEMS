@@ -48,12 +48,28 @@ Current features
 1. Get all stations for a specific user account
 2. Automatically get data for all inverters (for one station)
 3. The following devices are added to Domoticz for each inverter:
-    - temperature: Inverter temperature (Celcius)
-    - power: Current and total output power (Watts)
-    - current - Output current (ampere)
-    - voltage - Output Voltage
-    - frequency - Output frequncy (Hz, first phase)
-    - input strings: Voltage, current and power per string
+
+|Unit	|Description	|Type   |Remark
+|---    |---            |---    |---
+|1	|(Hardware name) - Inverter temperature (SN: (your S/N))	|LaCrosse TX3   |
+|2	|(Hardware name) - Inverter output current (SN: (your S/N))	|Current        |
+|3	|(Hardware name) - Inverter output voltage (SN: (your S/N))	|Voltage        |
+|4	|(Hardware name) - Inverter output power (SN: (your S/N))	|kWh            | default: used
+|5	|(Hardware name) - Inverter input 1 voltage (SN: (your S/N))	|Voltage    |
+|6	|(Hardware name) - Inverter input 1 Current (SN: (your S/N))	|Current    |
+|7	|(Hardware name) - Inverter input 2 voltage (SN: (your S/N))	|Voltage    |
+|8	|(Hardware name) - Inverter input 2 Current (SN: (your S/N))	|Current    |
+|9	|(Hardware name) - Inverter state (SN: (your S/N))	|Selector Switch        | default: used
+|10	|(Hardware name) - Solar inverter input 3 voltage (SN: (your S/N))	|Voltage|
+|11	|(Hardware name) - Solar inverter input 3 Current (SN: (your S/N))	|Current|
+|12	|(Hardware name) - Solar inverter input 4 voltage (SN: (your S/N))	|Voltage|
+|13	|(Hardware name) - Solar inverter input 4 Current (SN: (your S/N))	|Current|
+|14	|(Hardware name) - Inverter input 1 power (SN: (your S/N))	|kWh            | default: used. calculated in plugin
+|15	|(Hardware name) - Inverter input 2 power (SN: (your S/N))	|kWh            | calculated in plugin
+|16	|(Hardware name) - Inverter input 3 power (SN: (your S/N))	|kWh            | calculated in plugin
+|17	|(Hardware name) - Inverter input 4 power (SN: (your S/N))	|kWh            | calculated in plugin
+|18	|(Hardware name) - Inverter output frequency 1	|Custom Sensor              |
+
 
 There is a lot more information available trough the GoodWe API if you would like to have a specific feature added to this plugin please submit an issue as indicated in the paragraph above. 
 
