@@ -425,6 +425,6 @@ class GoodWe:
 
         r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=5)
         logging.debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        #logging.debug("response station data request : " + json.dumps(r.json()))
+        logging.debug("response station data request : " + json.dumps(r.json()))
         responseData = r.json()
         return responseData
