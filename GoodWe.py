@@ -330,7 +330,14 @@ class GoodWe:
             'pwd': self.Password,
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=5)
+        try:
+            r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=10)
+        except requests.exceptions.RequestException as exp:
+            logging.error("RequestException: " + str(exp))
+            Domoticz.Error("RequestException: " + str(exp))
+            self.tokenAvailable = False
+            return
+
         #r.raise_for_status()
         logging.debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         apiResponse = r.json()
@@ -423,7 +430,7 @@ class GoodWe:
             'powerStationId' : stationId
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=5)
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
         logging.debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         logging.debug("response station data request : " + json.dumps(r.json()))
         responseData = r.json()
