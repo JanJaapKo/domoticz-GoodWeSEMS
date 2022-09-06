@@ -28,6 +28,8 @@ import json
 import requests
 import time
 import exceptions
+import logging
+
 try:
 	import Domoticz
 	debug = False
@@ -120,7 +122,7 @@ class Inverter:
                   "SelectorStyle": "1"}
             Domoticz.Device(Name="Inverter state (SN: " + self.serialNumber + ")",
                             Unit=(self.inverterStateUnit), TypeName="Selector Switch", Image=1,
-                            Options=Options).Create()
+                            Options=Options, Used=1).Create()
                             
         if self.inputVoltage1Unit not in Devices:
             Domoticz.Device(Name="Inverter input 1 voltage (SN: " + self.serialNumber + ")",
@@ -212,6 +214,7 @@ class PowerStation:
             self._address = stationData["info"]["address"]
             self._id = stationData["info"]["powerstation_id"]
             Domoticz.Debug("create station with id: '" + self._id + "' and inverters: " + str(len(stationData["inverter"])) )
+            logging.debug("create station with id: '" + self._id + "' and inverters: " + str(len(stationData["inverter"])) )
             self.createInverters(stationData["inverter"])
             
     def __repr__(self):
@@ -221,6 +224,7 @@ class PowerStation:
         for inverter in inverterData:
             self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
             Domoticz.Debug("inverter created: '" + str(inverter['sn']) + "'")
+            logging.debug("inverter created: '" + str(inverter['sn']) + "'")
             self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
   
     @property
@@ -292,15 +296,16 @@ class GoodWe:
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({key : powerStation})
         Domoticz.Log("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
+        logging.info("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
 
     def createStationV2(self, stationData):
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({1 : powerStation})
         Domoticz.Log("PowerStation created: '" + powerStation.id + "'")
-        
+        logging.info("PowerStation created: '" + powerStation.id + "'")
     
     def apiRequestHeaders(self):
-        Domoticz.Debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
+        logging.debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
         return {
             'Content-Type': 'application/json; charset=utf-8',
             'Connection': 'keep-alive',
@@ -311,23 +316,30 @@ class GoodWe:
         }
 
     def apiRequestHeadersV2(self):
-        Domoticz.Debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
+        logging.debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
         return {
             'User-Agent': 'Domoticz/1.0',
             'token': json.dumps(self.token)
         }
 
     def tokenRequest(self):
-        Domoticz.Debug("build tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password +"'")
+        logging.debug("build tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password +"'")
         url = '/v2/Common/CrossLogin'
         loginPayload = {
             'account': self.Username,
             'pwd': self.Password,
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=5)
+        try:
+            r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=10)
+        except requests.exceptions.RequestException as exp:
+            logging.error("RequestException: " + str(exp))
+            Domoticz.Error("RequestException: " + str(exp))
+            self.tokenAvailable = False
+            return
+
         #r.raise_for_status()
-        Domoticz.Debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
+        logging.debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         apiResponse = r.json()
         if apiResponse["code"] == 100005:
             raise exceptions.GoodweException("invalid password or username")
@@ -340,10 +352,11 @@ class GoodWe:
 
         if apiResponse == 'Null':
             Domoticz.Log("SEMS API Token not received")
+            logging.info("SEMS API Token not received")
             self.tokenAvailable = False
         else:
             self.token = apiResponse['data']
-            Domoticz.Debug("SEMS API Token received: " + json.dumps(self.token))
+            logging.debug("SEMS API Token received: " + json.dumps(self.token))
             self.tokenAvailable = True
             self.base_url = apiResponse['api']
         
@@ -362,16 +375,16 @@ class GoodWe:
         # }
 
     def stationListRequest(self):
-        Domoticz.Debug("build stationListRequest")
+        logging.debug("build stationListRequest")
         url = 'v2/HistoryData/QueryPowerStationByHistory'
         r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), timeout=5)
  
-        Domoticz.Debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
+        logging.debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
 
         return r.status_code
 
     def stationDataRequestV1(self, stationIndex):
-        Domoticz.Debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numStations) + "' for PS index: '" + str(stationIndex) + "'")
+        logging.debug("build stationDataRequest with number of stations (len powerStationList) = '" + str(self.numStations) + "' for PS index: '" + str(stationIndex) + "'")
         #powerStation = self.powerStationList[self.powerStationIndex]
         powerStation = self.powerStationList[stationIndex]
         return {
@@ -386,7 +399,7 @@ class GoodWe:
     def stationDataRequestV2(self, stationId):
         for i in range(1, 4):
             try:
-                Domoticz.Debug("build stationDataRequest for 1 station, attempt: " + str(i))
+                logging.debug("build stationDataRequest for 1 station, attempt: " + str(i))
 
                 responseData = self.stationDataRequest(stationId)
                 try:
@@ -399,11 +412,13 @@ class GoodWe:
                     return responseData['data']
                 elif code == 100001 or code == 100002:
                     #token has expired or is not valid
+                    logging.info("Failed to call GoodWe API (no valid token), will be refreshed")
                     Domoticz.Log("Failed to call GoodWe API (no valid token), will be refreshed")
                     self.tokenRequest()
                 else:
                     raise exceptions.FailureWithErrorCode(code)
             except requests.exceptions.RequestException as exp:
+                logging.error("RequestException: " + str(exp))
                 Domoticz.Error("RequestException: " + str(exp))
             time.sleep(i ** 3)
         else:
@@ -415,8 +430,8 @@ class GoodWe:
             'powerStationId' : stationId
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=5)
-        Domoticz.Debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        #Domoticz.Debug("response station data request : " + json.dumps(r.json()))
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
+        logging.debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
+        logging.debug("response station data request : " + json.dumps(r.json()))
         responseData = r.json()
         return responseData
