@@ -6,13 +6,20 @@ This plugin was created by Dylian94 ([/dylian94/domoticz-GoodWeSEMS](https://git
 
 Installation and setup
 ----------------------
-Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wiki/Using_Python_plugins). Check limitations on the bottom of the page.
+Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wiki/Using_Python_plugins). Check limitations on the bottom of the page. The following Python modules should be installed. Login to a shell:
 
-Login to a shell, go to the domoticz plugin directory and clone this repository (eith SSH, requires git account):
+```
+sudo apt-get update
+sudo apt-get install python3-requests
+```
+
+Then, go to the domoticz plugin directory and clone this repository (eith SSH, requires git account):
 ```bash
 cd domoticz/plugins
 git clone git@github.com:janjaapko/domoticz-GoodWeSEMS.git
 ```
+
+OR
 
 Login to a shell, go to the domoticz plugin directory and clone this repository (with https, requires no git account):
 ```bash
