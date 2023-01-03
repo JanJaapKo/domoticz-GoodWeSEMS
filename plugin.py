@@ -429,6 +429,7 @@ def calculateNewEnergy(Unit, inputPower):
     logging.debug("Test power, previousPower: {}, last update: {:%Y-%m-%d %H:%M}, elapsedTime: {}, elapsedSeconds: {:6.2f}".format(previousPower, lastUpdateDT, elapsedTime, elapsedTime.total_seconds()))
     
     #average current and previous power (Watt) and multiply by elapsed time (hour) to get Watt hour
+    previousPower = previousPower.replace("w","").replace("W","")
     newCount = round(((float(previousPower) + inputPower ) / 2) * elapsedTime.total_seconds()/3600,2)
     newCounter = newCount + float(currentCount) #add the amount of energy since last update to the already logged energy
     logging.debug("Test power, previousPower: {}, currentCount: {:6.2f}, newCounter: {:6.2f}, added: {:6.2f}".format(previousPower, float(currentCount), newCounter, newCount))
