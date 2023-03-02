@@ -441,11 +441,11 @@ class GoodWe:
 
         r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
         logging.debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        logging.debug("response station data request : " + json.dumps(r.json()))
         try:
             apiResponse = r.json()
         except json.decoder.JSONDecodeError as exp:
             logging.error("RequestException: " + str(exp))
             Domoticz.Error("RequestException: " + str(exp))
             return False
+        logging.debug("response station data request : " + json.dumps(r.json()))
         return responseData
