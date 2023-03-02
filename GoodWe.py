@@ -333,14 +333,21 @@ class GoodWe:
         try:
             r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=10)
         except requests.exceptions.RequestException as exp:
-            logging.error("RequestException: " + str(exp))
-            Domoticz.Error("RequestException: " + str(exp))
+            logging.error("TokenRequestException: " + str(exp))
+            Domoticz.Error("TokenRequestException: " + str(exp))
             self.tokenAvailable = False
             return
 
         #r.raise_for_status()
         logging.debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        apiResponse = r.json()
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("TokenRequestException: " + str(exp))
+            Domoticz.Error("TokenRequestException: " + str(exp))
+            self.tokenAvailable = False
+            return
+
         if apiResponse["code"] == 100005:
             raise exceptions.GoodweException("invalid password or username")
         if 'api' not in apiResponse and 'msg' in apiResponse:
@@ -402,6 +409,8 @@ class GoodWe:
                 logging.debug("build stationDataRequest for 1 station, attempt: " + str(i))
 
                 responseData = self.stationDataRequest(stationId)
+                if not responseData:
+                    return
                 try:
                     code = int(responseData['code'])
                 except (ValueError, KeyError):
@@ -433,5 +442,10 @@ class GoodWe:
         r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
         logging.debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         logging.debug("response station data request : " + json.dumps(r.json()))
-        responseData = r.json()
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("RequestException: " + str(exp))
+            Domoticz.Error("RequestException: " + str(exp))
+            return False
         return responseData
