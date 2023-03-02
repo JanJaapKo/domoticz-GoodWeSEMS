@@ -448,4 +448,4 @@ class GoodWe:
             Domoticz.Error("RequestException: " + str(exp))
             return False
         logging.debug("response station data request : " + json.dumps(r.json()))
-        return responseData
+        return apiResponse
