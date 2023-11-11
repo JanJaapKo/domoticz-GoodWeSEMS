@@ -31,11 +31,12 @@ import exceptions
 import logging
 
 try:
-	import Domoticz
-	debug = False
+    #import Domoticz
+    import DomoticzEx as Domoticz
+    debug = False
 except ImportError:
-	import fakeDomoticz as Domoticz
-	debug = True
+    import fakeDomoticz as Domoticz
+    debug = True
 
 class Inverter:
     """
@@ -63,29 +64,9 @@ class Inverter:
     outputFreq1Unit = 18
     #inputPowerTest = 19
 
-    def __init__(self, inverterData, startNum):
+    def __init__(self, inverterData):
         self._sn = inverterData["sn"]
         self._name = inverterData["name"]
-        self.inverterTemperatureUnit = 1 + startNum
-        self.inverterStateUnit = 9 + startNum
-        self.outputCurrentUnit = 2 + startNum
-        self.outputVoltageUnit = 3 + startNum
-        self.outputPowerUnit = 4 + startNum
-        self.inputVoltage1Unit = 5 + startNum
-        self.inputAmps1Unit = 6 + startNum
-        self.inputPower1Unit = 14 + startNum
-        #self.inputPowerTest = 19 + startNum
-        self.inputPower2Unit = 15 + startNum
-        self.inputPower3Unit = 16 + startNum
-        self.inputPower4Unit = 17 + startNum
-        self.inputVoltage2Unit = 7 + startNum
-        self.inputVoltage3Unit = 10 + startNum
-        self.inputVoltage4Unit = 12 + startNum
-        self.inputAmps2Unit = 8 + startNum
-        self.inputAmps3Unit = 11 + startNum
-        self.inputAmps4Unit = 13 + startNum
-        self.outputFreq1Unit = 18 + startNum
-
 
     def __repr__(self):
         return "Inverter type: '" + self._name + "' with serial number: '" + self._sn + "'"
@@ -98,88 +79,6 @@ class Inverter:
     def type(self):
         return self._name
 
-    def createDevices(self, Devices):
-        #create domoticz devices
-        numDevs = len(Devices)
-        if self.inverterTemperatureUnit not in Devices:
-            Domoticz.Device(Name="Inverter temperature (SN: " + self.serialNumber + ")",
-                            Unit=(self.inverterTemperatureUnit), Type=80, Subtype=5).Create()
-        if self.outputCurrentUnit not in Devices:
-            Domoticz.Device(Name="Inverter output current (SN: " + self.serialNumber + ")",
-                            Unit=(self.outputCurrentUnit), Type=243, Subtype=23).Create()
-        if self.outputVoltageUnit not in Devices:
-            Domoticz.Device(Name="Inverter output voltage (SN: " + self.serialNumber + ")",
-                            Unit=(self.outputVoltageUnit), Type=243, Subtype=8).Create()
-        if self.outputPowerUnit not in Devices:
-            Domoticz.Device(Name="Inverter output power (SN: " + self.serialNumber + ")",
-                            Unit=(self.outputPowerUnit), Type=243, Subtype=29,
-                            Switchtype=4, Used=1).Create()
-                            
-        if self.inverterStateUnit not in Devices:
-            Options = {"LevelActions": "|||",
-                  "LevelNames": "|Offline|Waiting|Generating|Error",
-                  "LevelOffHidden": "true",
-                  "SelectorStyle": "1"}
-            Domoticz.Device(Name="Inverter state (SN: " + self.serialNumber + ")",
-                            Unit=(self.inverterStateUnit), TypeName="Selector Switch", Image=1,
-                            Options=Options, Used=1).Create()
-                            
-        if self.inputVoltage1Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 1 voltage (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputVoltage1Unit), Type=243, Subtype=8).Create()
-        if self.inputAmps1Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 1 Current (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputAmps1Unit), Type=243, Subtype=23,
-                            Switchtype=4, Used=0).Create()
-        if self.inputPower1Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 1 power (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputPower1Unit), Type=243, Subtype=29,
-                            Switchtype=4, Used=1).Create()
-        # if self.inputPowerTest not in Devices:
-            # Domoticz.Device(Name="Inverter input test power (SN: " + self.serialNumber + ")",
-                            # Unit=(self.inputPowerTest), Type=243, Subtype=29,
-                            # Switchtype=4, Used=1).Create()
-        if self.inputVoltage2Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 2 voltage (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputVoltage2Unit), Type=243, Subtype=8, Used=0).Create()
-        #input string 2.. 4 are optional. Set devices to not-used
-        if self.inputAmps2Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 2 Current (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputAmps2Unit), Type=243, Subtype=23,
-                            Switchtype=4, Used=0).Create()
-        if self.inputVoltage3Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 3 voltage (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputVoltage3Unit), Type=243, Subtype=8, Used=0).Create()
-        if self.inputAmps3Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 3 Current (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputAmps3Unit), Type=243, Subtype=23,
-                            Switchtype=4, Used=0).Create()
-        if self.inputVoltage4Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 4 voltage (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputVoltage4Unit), Type=243, Subtype=8, Used=0).Create()
-        if self.inputAmps4Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 4 Current (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputAmps4Unit), Type=243, Subtype=23,
-                            Switchtype=4, Used=0).Create()
-        if self.inputPower2Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 2 power (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputPower2Unit), Type=243, Subtype=29,
-                            Switchtype=4, Used=0).Create()
-        if self.inputPower3Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 3 power (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputPower3Unit), Type=243, Subtype=29,
-                            Switchtype=4, Used=0).Create()
-        if self.inputPower4Unit not in Devices:
-            Domoticz.Device(Name="Inverter input 4 power (SN: " + self.serialNumber + ")",
-                            Unit=(self.inputPower4Unit), Type=243, Subtype=29,
-                            Switchtype=4, Used=0).Create()
-        if self.outputFreq1Unit not in Devices:
-            Domoticz.Device(Name="Inverter output frequency 1 (SN: " + self.serialNumber + ")",
-                            Unit=(self.outputFreq1Unit), TypeName="Custom",
-                            Used=0).Create()
-        if numDevs < len(Devices):
-            Domoticz.Log("Number of Devices: " + str(len(Devices)) + ", created for GoodWe inverter (SN: " + self.serialNumber + ")")
-        
 class PowerStation:
     """
     A class to describe the methods and properties of a GoodWe PowerStation.
@@ -213,7 +112,6 @@ class PowerStation:
             self._name = stationData["info"]["stationname"]
             self._address = stationData["info"]["address"]
             self._id = stationData["info"]["powerstation_id"]
-            Domoticz.Debug("create station with id: '" + self._id + "' and inverters: " + str(len(stationData["inverter"])) )
             logging.debug("create station with id: '" + self._id + "' and inverters: " + str(len(stationData["inverter"])) )
             self.createInverters(stationData["inverter"])
             
@@ -222,8 +120,8 @@ class PowerStation:
     
     def createInverters(self, inverterData):
         for inverter in inverterData:
-            self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
-            Domoticz.Debug("inverter created: '" + str(inverter['sn']) + "'")
+            #self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
+            self.inverters[inverter['sn']] = Inverter(inverter)
             logging.debug("inverter created: '" + str(inverter['sn']) + "'")
             self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
   
@@ -295,13 +193,13 @@ class GoodWe:
         #for key, station in enumerate(apiData["list"]):
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({key : powerStation})
-        Domoticz.Log("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
+        #Domoticz.Log("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
         logging.info("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
 
     def createStationV2(self, stationData):
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({1 : powerStation})
-        Domoticz.Log("PowerStation created: '" + powerStation.id + "'")
+        #Domoticz.Log("PowerStation created: '" + powerStation.id + "'")
         logging.info("PowerStation created: '" + powerStation.id + "'")
     
     def apiRequestHeaders(self):
@@ -358,7 +256,7 @@ class GoodWe:
         apiUrl = apiResponse["components"]["api"]
 
         if apiResponse == 'Null':
-            Domoticz.Log("SEMS API Token not received")
+            #Domoticz.Log("SEMS API Token not received")
             logging.info("SEMS API Token not received")
             self.tokenAvailable = False
         else:
@@ -422,7 +320,7 @@ class GoodWe:
                 elif code == 100001 or code == 100002:
                     #token has expired or is not valid
                     logging.info("Failed to call GoodWe API (no valid token), will be refreshed")
-                    Domoticz.Log("Failed to call GoodWe API (no valid token), will be refreshed")
+                    #Domoticz.Log("Failed to call GoodWe API (no valid token), will be refreshed")
                     self.tokenRequest()
                 else:
                     raise exceptions.FailureWithErrorCode(code)

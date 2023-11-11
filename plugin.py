@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="3.0.3" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="3.1.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -60,6 +60,9 @@
                 <option label="30m" value="180"/>
             </options>
         </param>
+        <param field="Mode3" label="Peak power [W]" width="300px">
+            <description>Optional: Peak power, supply values (separated by ';'): total power; power per string</description>
+        </param>
         <param field="Mode6" label="Log level" width="75px">
             <options>
                 <option label="Verbose" value="Verbose"/>
@@ -71,7 +74,8 @@
 </plugin>
 """
 import json
-import Domoticz
+#import Domoticz
+import DomoticzEx as Domoticz
 import sys, time
 from datetime import datetime, timedelta
 from GoodWe import GoodWe
@@ -88,9 +92,27 @@ class GoodWeSEMSPlugin:
     
     baseDeviceIndex = 0
     maxDeviceIndex = 0
-    log_filename = "goodwe.log"
 
     def __init__(self):
+        startNum = 0
+        self.inverterTemperatureUnit = 1 + startNum
+        self.inverterStateUnit = 9 + startNum
+        self.outputCurrentUnit = 2 + startNum
+        self.outputVoltageUnit = 3 + startNum
+        self.outputPowerUnit = 4 + startNum
+        self.inputVoltage1Unit = 5 + startNum
+        self.inputAmps1Unit = 6 + startNum
+        self.inputPower1Unit = 14 + startNum
+        self.inputPower2Unit = 15 + startNum
+        self.inputPower3Unit = 16 + startNum
+        self.inputPower4Unit = 17 + startNum
+        self.inputVoltage2Unit = 7 + startNum
+        self.inputVoltage3Unit = 10 + startNum
+        self.inputVoltage4Unit = 12 + startNum
+        self.inputAmps2Unit = 8 + startNum
+        self.inputAmps3Unit = 11 + startNum
+        self.inputAmps4Unit = 13 + startNum
+        self.outputFreq1Unit = 18 + startNum
         return
 
     def apiConnection(self):
@@ -129,7 +151,8 @@ class GoodWeSEMSPlugin:
         for inverter in apiData["inverter"]:
             logging.debug("inverter found with SN: '" + inverter["sn"] + "'")
             if inverter["sn"] in theStation.inverters:
-                theStation.inverters[inverter["sn"]].createDevices(Devices)
+                #theStation.inverters[inverter["sn"]].createDevices(Devices)
+                self.createDevices(inverter["sn"])
                 
                 theInverter = theStation.inverters[inverter["sn"]]
 
@@ -138,53 +161,146 @@ class GoodWeSEMSPlugin:
                     logging.info("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
                 Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
                 logging.info("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
-                Devices[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
+                UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, inverter["status"]+1, str((inverter["status"]+2)*10), AlwaysUpdate=True)
+                #Devices[inverter["sn"]].Unit[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
                 if self.goodWeAccount.INVERTER_STATE[inverter["status"]] == 'generating':
                     logging.debug("inverter generating, log temp")
-                    UpdateDevice(theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
-                    UpdateDevice(theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
+                    UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
+                    UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
 
-                UpdateDevice(theInverter.outputCurrentUnit, 0, str(inverter["output_current"]), AlwaysUpdate=True)
-                UpdateDevice(theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]), AlwaysUpdate=True)
-                UpdateDevice(theInverter.outputPowerUnit, 0, str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000), AlwaysUpdate=True)
+                UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, str(inverter["output_current"]), AlwaysUpdate=True)
+                UpdateDevice(inverter["sn"], theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]), AlwaysUpdate=True)
+                UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000), AlwaysUpdate=True)
                 inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
-                inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1])) #calculate the power based on P = I * V in Watt
-                UpdateDevice(theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
-                UpdateDevice(theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
+                inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1]) #calculate the power based on P = I * V in Watt
+                UpdateDevice(inverter["sn"], theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
+                UpdateDevice(inverter["sn"], theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
 
-                newCounter = calculateNewEnergy(theInverter.inputPower1Unit, inputPower)
-                UpdateDevice(theInverter.inputPower1Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower1Unit, inputPower)
+                UpdateDevice(inverter["sn"],theInverter.inputPower1Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
 
                 if "pv_input_2" in inverter:
                     logging.debug("Second string found")
                     inputVoltage,inputAmps = inverter["pv_input_2"].split('/')
-                    UpdateDevice(theInverter.inputVoltage2Unit, 0, inputVoltage, AlwaysUpdate=True)
-                    UpdateDevice(theInverter.inputAmps2Unit, 0, inputAmps, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"],theInverter.inputVoltage2Unit, 0, inputVoltage, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"],theInverter.inputAmps2Unit, 0, inputAmps, AlwaysUpdate=True)
                     inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
-                    newCounter = calculateNewEnergy(theInverter.inputPower2Unit, inputPower)
-                    UpdateDevice(theInverter.inputPower2Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower2Unit, inputPower)
+                    UpdateDevice(inverter["sn"],theInverter.inputPower2Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
                 if "pv_input_3" in inverter:
                     logging.debug("Third string found")
                     inputVoltage,inputAmps = inverter["pv_input_3"].split('/')
-                    UpdateDevice(theInverter.inputVoltage3Unit, 0, inputVoltage, AlwaysUpdate=True)
-                    UpdateDevice(theInverter.inputAmps3Unit, 0, inputAmps, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"],theInverter.inputVoltage3Unit, 0, inputVoltage, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"],theInverter.inputAmps3Unit, 0, inputAmps, AlwaysUpdate=True)
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                    newCounter = calculateNewEnergy(theInverter.inputPower3Unit, inputPower)
-                    UpdateDevice(theInverter.inputPower3Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower3Unit, inputPower)
+                    UpdateDevice(inverter["sn"],theInverter.inputPower3Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
                 if "pv_input_4" in inverter:
                     logging.debug("Fourth string found")
                     inputVoltage,inputAmps = inverter["pv_input_4"].split('/')
-                    UpdateDevice(theInverter.inputVoltage4Unit, 0, inputVoltage, AlwaysUpdate=True)
-                    UpdateDevice(theInverter.inputAmps4Unit, 0, inputAmps, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"],theInverter.inputVoltage4Unit, 0, inputVoltage, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"],theInverter.inputAmps4Unit, 0, inputAmps, AlwaysUpdate=True)
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                    newCounter = calculateNewEnergy(theInverter.inputPower4Unit, inputPower)
-                    UpdateDevice(theInverter.inputPower4Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower4Unit, inputPower)
+                    UpdateDevice(inverter["sn"],theInverter.inputPower4Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
                 #log data of battery
                 Domoticz.Debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
                 logging.debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
 
+    def createDevices(self, serialNumber):
+        #create domoticz devices
+        logging.info("creating units for device with serial number: "+ serialNumber)
+        thisDevice = Domoticz.Device(DeviceID=serialNumber) #use serial number as identifier for Domoticz.Device instance
+        numDevs = len(Devices[serialNumber].Units)
+        if self.inverterTemperatureUnit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter temperature (SN: " + serialNumber + ")",
+                            Unit=(self.inverterTemperatureUnit), Type=80, Subtype=5, DeviceID=serialNumber).Create()
+        #if self.outputCurrentUnit not in Devices:
+        if self.outputCurrentUnit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter output current (SN: " + serialNumber + ")",
+                            Unit=(self.outputCurrentUnit), Type=243, Subtype=23, DeviceID=serialNumber).Create()
+        if self.outputVoltageUnit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter output voltage (SN: " + serialNumber + ")",
+                            Unit=(self.outputVoltageUnit), Type=243, Subtype=8, DeviceID=serialNumber).Create()
+        if self.outputPowerUnit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter output power (SN: " + serialNumber + ")",
+                            Unit=(self.outputPowerUnit), Type=243, Subtype=29,
+                            Switchtype=4, Used=1, DeviceID=serialNumber).Create()
+                            
+        if self.inverterStateUnit not in Devices[serialNumber].Units:
+            Options = {"LevelActions": "|||",
+                  "LevelNames": "|Offline|Waiting|Generating|Error",
+                  "LevelOffHidden": "true",
+                  "SelectorStyle": "1"}
+            Domoticz.Unit(Name="Inverter state (SN: " + serialNumber + ")",
+                            Unit=(self.inverterStateUnit), TypeName="Selector Switch", Image=1,
+                            Options=Options, Used=1, DeviceID=serialNumber).Create()
+                            
+        if self.inputVoltage1Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 1 voltage (SN: " + serialNumber + ")",
+                            Unit=(self.inputVoltage1Unit), Type=243, Subtype=8, 
+                            DeviceID=serialNumber).Create()
+        if self.inputAmps1Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 1 Current (SN: " + serialNumber + ")",
+                            Unit=(self.inputAmps1Unit), Type=243, Subtype=23,
+                            Switchtype=4, Used=0, DeviceID=serialNumber).Create()
+        if self.inputPower1Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 1 power (SN: " + serialNumber + ")",
+                            Unit=(self.inputPower1Unit), Type=243, Subtype=29,
+                            Switchtype=4, Used=1, DeviceID=serialNumber).Create()
+        if self.inputVoltage2Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 2 voltage (SN: " + serialNumber + ")",
+                            Unit=(self.inputVoltage2Unit), Type=243, Subtype=8, Used=0, 
+                            DeviceID=serialNumber).Create()
+        #input string 2.. 4 are optional. Set devices to not-used
+        if self.inputAmps2Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 2 Current (SN: " + serialNumber + ")",
+                            Unit=(self.inputAmps2Unit), Type=243, Subtype=23,
+                            Switchtype=4, Used=0, DeviceID=serialNumber).Create()
+        if self.inputVoltage3Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 3 voltage (SN: " + serialNumber + ")",
+                            Unit=(self.inputVoltage3Unit), Type=243, Subtype=8, Used=0, 
+                            DeviceID=serialNumber).Create()
+        if self.inputAmps3Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 3 Current (SN: " + serialNumber + ")",
+                            Unit=(self.inputAmps3Unit), Type=243, Subtype=23,
+                            Switchtype=4, Used=0, DeviceID=serialNumber).Create()
+        if self.inputVoltage4Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 4 voltage (SN: " + serialNumber + ")",
+                            Unit=(self.inputVoltage4Unit), Type=243, Subtype=8, Used=0, 
+                            DeviceID=serialNumber).Create()
+        if self.inputAmps4Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 4 Current (SN: " + serialNumber + ")",
+                            Unit=(self.inputAmps4Unit), Type=243, Subtype=23,
+                            Switchtype=4, Used=0, DeviceID=serialNumber).Create()
+        if self.inputPower2Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 2 power (SN: " + serialNumber + ")",
+                            Unit=(self.inputPower2Unit), Type=243, Subtype=29,
+                            Switchtype=4, Used=0, DeviceID=serialNumber).Create()
+        if self.inputPower3Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 3 power (SN: " + serialNumber + ")",
+                            Unit=(self.inputPower3Unit), Type=243, Subtype=29,
+                            Switchtype=4, Used=0, DeviceID=serialNumber).Create()
+        if self.inputPower4Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter input 4 power (SN: " + serialNumber + ")",
+                            Unit=(self.inputPower4Unit), Type=243, Subtype=29,
+                            Switchtype=4, Used=0, DeviceID=serialNumber).Create()
+        if self.outputFreq1Unit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter output frequency 1 (SN: " + serialNumber + ")",
+                            Unit=(self.outputFreq1Unit), TypeName="Custom",
+                            Used=0, DeviceID=serialNumber).Create()
+        logging.info("finished creating devices, current count: "+str(len(Devices[serialNumber].Units)))
+        if numDevs < len(Devices[serialNumber].Units):
+            if "54200DSN196R0358" in Devices:
+                Domoticz.Debug("Number of Units: " + str(len(Devices[serialNumber].Units)) + ", number of units: " + str(len(Devices["54200DSN196R0358"].Units)) + ")")
+            else:
+                Domoticz.Debug("no Device with Serial Number found")
+            #Domoticz.Log("Number of Devices: " + str(len(Devices[serialNumber].Units)) + ", created for GoodWe inverter (SN: " + serialNumber + ")")
+        
+
     def onStart(self):
         self.logger = logging.getLogger('root')
+        self.log_filename = "goodwe "+Parameters["Name"]+".log"
         if Parameters["Mode6"] == "Verbose":
             Domoticz.Debugging(1)
             logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename=self.log_filename,level=logging.DEBUG)
@@ -230,6 +346,8 @@ class GoodWeSEMSPlugin:
 
     def onMessage(self, Connection, Data):
         logging.debug("onMessage: data received: Data : '" + str(Data) + "'")
+        Domoticz.Error("onMessage called unexpectedly: data received: Data : '" + str(Data) + "'")
+        return
         status = int(Data["Status"])
 
         if status == 200:
@@ -308,7 +426,8 @@ class GoodWeSEMSPlugin:
                     for inverter in apiData["inverter"]:
                         logging.debug("inverter found with SN: '" + inverter["sn"] + "'")
                         if inverter["sn"] in theStation.inverters:
-                            theStation.inverters[inverter["sn"]].createDevices(Devices)
+                            #stheStation.inverters[inverter["sn"]].createDevices(Devices)
+                            self.createDevices(inverter["sn"])
                             logging.debug("Details d in inverter: '" + str(inverter['d']) + "'")
                             
                             theInverter = theStation.inverters[inverter["sn"]]
@@ -409,22 +528,22 @@ class GoodWeSEMSPlugin:
                 self.startDeviceUpdateV2()
 
                 self.runAgain = int(Parameters["Mode2"])
-            else:
-                logging.debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
+            # else:
+                # logging.debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
 
 global _plugin
 _plugin = GoodWeSEMSPlugin()
 
-def calculateNewEnergy(Unit, inputPower):
+def calculateNewEnergy(Device, Unit, inputPower):
     try:
         #read power currently on display (comes from previous update) in Watt and energy counter uptill now in Wh
-        previousPower,currentCount = Devices[Unit].sValue.split(";") 
+        previousPower,currentCount = Devices[Device].Units[Unit].sValue.split(";") 
     except:
         #in case no values there, just assume zero
         previousPower = 0 #Watt
         currentCount = 0 #Wh
     dt_format = "%Y-%m-%d %H:%M:%S"
-    dt_string = Devices[Unit].LastUpdate
+    dt_string = Devices[Device].Units[Unit].LastUpdate
     lastUpdateDT = datetime.fromtimestamp(time.mktime(time.strptime(dt_string, dt_format)))
     elapsedTime = datetime.now() - lastUpdateDT
     logging.debug("Test power, previousPower: {}, last update: {:%Y-%m-%d %H:%M}, elapsedTime: {}, elapsedSeconds: {:6.2f}".format(previousPower, lastUpdateDT, elapsedTime, elapsedTime.total_seconds()))
@@ -436,20 +555,7 @@ def calculateNewEnergy(Unit, inputPower):
     logging.debug("Test power, previousPower: {}, currentCount: {:6.2f}, newCounter: {:6.2f}, added: {:6.2f}".format(previousPower, float(currentCount), newCounter, newCount))
     return newCounter
 
-def UpdateDevice(Unit, nValue, sValue, BatteryLevel=255, AlwaysUpdate=False):
-    if Unit not in Devices: return
-    if Devices[Unit].nValue != nValue\
-        or Devices[Unit].sValue != sValue\
-        or Devices[Unit].BatteryLevel != BatteryLevel\
-        or AlwaysUpdate == True:
 
-        Devices[Unit].Update(nValue, str(sValue), BatteryLevel=BatteryLevel)
-
-        logging.debug("Update %s: nValue %s - sValue %s - BatteryLevel %s" % (
-            Devices[Unit].Name,
-            nValue,
-            sValue,
-            BatteryLevel))
 
 def onStart():
     global _plugin
@@ -498,8 +604,13 @@ def DumpConfigToLog():
         if Parameters[x] != "":
             Domoticz.Debug("Parameter: '" + x + "':'" + str(Parameters[x]) + "'")
     Domoticz.Debug("Device count: " + str(len(Devices)))
-    for x in Devices:
-        Domoticz.Debug("Device:           " + str(x) + " - " + str(Devices[x]))
+    for DeviceName in Devices:
+        Device = Devices[DeviceName]
+        Domoticz.Debug("Device:       '" + str(Device) + "'")
+        for UnitNo in Device.Units:
+            Unit = Device.Units[UnitNo]
+            Domoticz.Debug(" - Unit:       '" + str(Unit) + "'")
+
     return
 
 def DumpHTTPResponseToLog(httpDict):
@@ -512,3 +623,19 @@ def DumpHTTPResponseToLog(httpDict):
                     logging.debug("------->'" + y + "':'" + str(httpDict[x][y]) + "'")
             else:
                 logging.debug("--->'" + x + "':'" + str(httpDict[x]) + "'")
+
+def UpdateDevice(Device, Unit, nValue, sValue, AlwaysUpdate=False):
+    # Make sure that the Domoticz device still exists (they can be deleted) before updating it
+    if (Device in Devices):
+        logging.debug("Updating device '"+Devices[Device].Units[Unit].Name+ "' with current sValue '"+Devices[Device].Units[Unit].sValue+"' to '" +sValue+"'")
+        if (Devices[Device].Units[Unit].nValue != nValue) or (Devices[Device].Units[Unit].sValue != sValue):
+            try:
+                Devices[Device].Units[Unit].nValue = nValue
+                Devices[Device].Units[Unit].sValue = sValue
+                Devices[Device].Units[Unit].Update()
+                
+                logging.debug("Update "+str(nValue)+":'"+str(sValue)+"' ("+Devices[Device].Units[Unit].Name+")")
+            except:
+                Domoticz.Error("Update of device failed: "+str(Unit)+"!")
+                logging.error("Update of device failed: "+str(Unit)+"!")
+    return

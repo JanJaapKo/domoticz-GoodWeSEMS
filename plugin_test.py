@@ -20,7 +20,7 @@ class BasicInverterTest(unittest.TestCase):
             "relation_name": None,
             "status": -1,
         }
-        self.inverter = Inverter(self.inverterApi, 1)
+        self.inverter = Inverter(self.inverterApi)
 
     def test_invSerial(self):
         self.assertEqual(self.inverter.serialNumber, "sn_simple")
@@ -151,7 +151,9 @@ class PowerStationTest(unittest.TestCase):
 
 def main():
     logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename="goodwe_test.log",level=logging.DEBUG)
+    logging.info("==== starting test run ====")
     unittest.main()
+    logging.info("==== finished test run ====")
 
 
 if __name__ == "__main__":
