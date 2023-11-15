@@ -523,22 +523,23 @@ class GoodWeSEMSPlugin:
         self.httpConn = None
 
     def onHeartbeat(self):
-        if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated and self.enabled:
-            logging.debug("onHeartbeat called, Connection is alive.")
-        elif len(Parameters["Mode1"]) == 0:
-            Domoticz.Error("No Power Station ID provided, exiting")
-            logging.error("No Power Station ID provided, exiting")
-            return
-        else:
-            self.runAgain = self.runAgain - 1
-            if self.runAgain <= 0:
+        if self.enabled:
+            if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
+                logging.debug("onHeartbeat called, Connection is alive.")
+            elif len(Parameters["Mode1"]) == 0:
+                Domoticz.Error("No Power Station ID provided, exiting")
+                logging.error("No Power Station ID provided, exiting")
+                return
+            else:
+                self.runAgain = self.runAgain - 1
+                if self.runAgain <= 0:
 
-                logging.debug("onHeartbeat called, starting device update.")
-                self.startDeviceUpdateV2()
+                    logging.debug("onHeartbeat called, starting device update.")
+                    self.startDeviceUpdateV2()
 
-                self.runAgain = int(Parameters["Mode2"])
-            # else:
-                # logging.debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
+                    self.runAgain = int(Parameters["Mode2"])
+                # else:
+                    # logging.debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
 
     def checkVersion(self, version):
         """checks actual version against stored version as 'Ma.Mi.Pa' and checks if updates needed"""
@@ -574,7 +575,7 @@ class GoodWeSEMSPlugin:
         if len(Devices)>0:
             Domoticz.Error("Devices are present. Please upgrade them before upgrading to this version!")
             Domoticz.Error("Plugin will now exit but will be enabled on next start")
-            self._setVersion(MaCurrent,MiCurrent,PaCurrent)
+            self._setVersion("4","0","0")
             return False
         else:
             return True
