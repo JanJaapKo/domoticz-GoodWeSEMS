@@ -4,6 +4,10 @@ This plugin provides information about your GoodWe solar inverter too Domoticz. 
 
 This plugin was created by Dylian94 ([/dylian94/domoticz-GoodWeSEMS](https://github.com/dylian94/domoticz-GoodWeSEMS)) but that version is out of maintenance. Additional credits to [Mark Ruys' gw2pvo](https://github.com/markruys/gw2pvo) for getting the API calls right.......
 
+Important update note (v4)
+----------------------
+Per version 4 (November 2023), I've updated the plugin to the Domoticz Extend Framework, which means the device definition is changed. To make sure that you still have your origina data, please read the [wiki](https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki).
+
 Installation and setup
 ----------------------
 Follow the Domoticz guide on [Using Python Plugins](https://www.domoticz.com/wiki/Using_Python_plugins). Check limitations on the bottom of the page. The following Python modules should be installed. Login to a shell:
