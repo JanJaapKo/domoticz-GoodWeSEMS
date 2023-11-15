@@ -115,6 +115,7 @@ class GoodWeSEMSPlugin:
         self.inputAmps3Unit = 11 + startNum
         self.inputAmps4Unit = 13 + startNum
         self.outputFreq1Unit = 18 + startNum
+        self.enabled = False
         return
 
     def apiConnection(self):
@@ -319,6 +320,12 @@ class GoodWeSEMSPlugin:
         
         logging.info("starting plugin version "+Parameters["Version"])
 
+        #check upgrading of version needs actions
+        self.version = Parameters["Version"]
+        self.enabled = self.checkVersion(self.version)
+        if not self.enabled:
+            return False
+
         self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
         self.runAgain = int(Parameters["Mode2"])
 
@@ -516,7 +523,7 @@ class GoodWeSEMSPlugin:
         self.httpConn = None
 
     def onHeartbeat(self):
-        if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
+        if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated and self.enabled:
             logging.debug("onHeartbeat called, Connection is alive.")
         elif len(Parameters["Mode1"]) == 0:
             Domoticz.Error("No Power Station ID provided, exiting")
@@ -532,6 +539,54 @@ class GoodWeSEMSPlugin:
                 self.runAgain = int(Parameters["Mode2"])
             # else:
                 # logging.debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
+
+    def checkVersion(self, version):
+        """checks actual version against stored version as 'Ma.Mi.Pa' and checks if updates needed"""
+        #read version from stored configuration
+        ConfVersion = getConfigItem("plugin version", "0.0.0")
+        Domoticz.Log("Starting version: " + version )
+        logging.info("Starting version: " + version )
+        MaCurrent,MiCurrent,PaCurrent = version.split('.')
+        MaConf,MiConf,PaConf = ConfVersion.split('.')
+        logging.debug("checking versions: current '{0}', config '{1}'".format(version, ConfVersion))
+        can_continue = True
+        if int(MaConf) < int(MaCurrent):
+            Domoticz.Log("Major version upgrade: {0} -> {1}".format(MaConf,MaCurrent))
+            logging.info("Major version upgrade: {0} -> {1}".format(MaConf,MaCurrent))
+            #add code to perform MAJOR upgrades
+            if int(MaConf) < 4:
+                can_continue = self.updateToEx()
+        elif int(MiConf) < int(MiCurrent):
+            Domoticz.Debug("Minor version upgrade: {0} -> {1}".format(MiConf,MiCurrent))
+            logging.debug("Minor version upgrade: {0} -> {1}".format(MiConf,MiCurrent))
+            #add code to perform MINOR upgrades
+        elif int(PaConf) < int(PaCurrent):
+            Domoticz.Debug("Patch version upgrade: {0} -> {1}".format(PaConf,PaCurrent))
+            logging.debug("Patch version upgrade: {0} -> {1}".format(PaConf,PaCurrent))
+            #add code to perform PATCH upgrades, if any
+        if ConfVersion != version and can_continue:
+            #store new version info
+            self._setVersion(MaCurrent,MiCurrent,PaCurrent)
+        return can_continue
+
+    def updateToEx(self):
+        """routine to check if we can update to the Domoticz extended plugin framework"""
+        if len(Devices)>0:
+            Domoticz.Error("Devices are present. Please upgrade them before upgrading to this version!")
+            Domoticz.Error("Plugin will now exit but will be enabled on next start")
+            self._setVersion(MaCurrent,MiCurrent,PaCurrent)
+            return False
+        else:
+            return True
+
+    def _setVersion(self, major, minor, patch):
+        #set configs
+        logging.debug("Setting version to {0}.{1}.{2}".format(major, minor, patch))
+        setConfigItem(Key="MajorVersion", Value=major)
+        setConfigItem(Key="MinorVersion", Value=minor)
+        setConfigItem(Key="patchVersion", Value=patch)
+        setConfigItem(Key="plugin version", Value="{0}.{1}.{2}".format(major, minor, patch))
+
 
 global _plugin
 _plugin = GoodWeSEMSPlugin()
@@ -641,3 +696,34 @@ def UpdateDevice(Device, Unit, nValue, sValue, AlwaysUpdate=False):
                 Domoticz.Error("Update of device failed: "+str(Unit)+"!")
                 logging.error("Update of device failed: "+str(Unit)+"!")
     return
+
+# Configuration Helpers
+def getConfigItem(Key=None, Default={}):
+   Value = Default
+   try:
+       Config = Domoticz.Configuration()
+       if (Key != None):
+           Value = Config[Key] # only return requested key if there was one
+       else:
+           Value = Config      # return the whole configuration if no key
+   except KeyError:
+       Value = Default
+   except Exception as inst:
+       Domoticz.Error("Domoticz.Configuration read failed: '"+str(inst)+"'")
+   return Value
+   
+def setConfigItem(Key=None, Value=None):
+    Config = {}
+    if type(Value) not in (str, int, float, bool, bytes, bytearray, list, dict):
+        Domoticz.Error("A value is specified of a not allowed type: '" + str(type(Value)) + "'")
+        return Config
+    try:
+       Config = Domoticz.Configuration()
+       if (Key != None):
+           Config[Key] = Value
+       else:
+           Config = Value  # set whole configuration if no key specified
+       Config = Domoticz.Configuration(Config)
+    except Exception as inst:
+       Domoticz.Error("Domoticz.Configuration operation failed: '"+str(inst)+"'")
+    return Config
