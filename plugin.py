@@ -17,11 +17,11 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.0.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.0.1" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
-        <p>Version: 4.0.0</p>
+        <p>Version: 4.0.1</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -214,21 +214,21 @@ class GoodWeSEMSPlugin:
         #create domoticz devices
         logging.info("creating units for device with serial number: "+ serialNumber)
         thisDevice = Domoticz.Device(DeviceID=serialNumber) #use serial number as identifier for Domoticz.Device instance
-        numDevs = len(Devices[serialNumber].Units)
-        if self.inverterTemperatureUnit not in Devices[serialNumber].Units:
-            Domoticz.Unit(Name="Inverter temperature (SN: " + serialNumber + ")",
-                            Unit=(self.inverterTemperatureUnit), Type=80, Subtype=5, DeviceID=serialNumber).Create()
+        #numDevs = len(Devices[serialNumber].Units)
+        if serialNumber not in Devices or self.inverterTemperatureUnit not in Devices[serialNumber].Units:
+            Domoticz.Unit(Name="Inverter temperature (SN: " + serialNumber + ")", DeviceID=serialNumber,
+                            Unit=(self.inverterTemperatureUnit), Type=80, Subtype=5).Create()
         #if self.outputCurrentUnit not in Devices:
         if self.outputCurrentUnit not in Devices[serialNumber].Units:
-            Domoticz.Unit(Name="Inverter output current (SN: " + serialNumber + ")",
-                            Unit=(self.outputCurrentUnit), Type=243, Subtype=23, DeviceID=serialNumber).Create()
+            Domoticz.Unit(Name="Inverter output current (SN: " + serialNumber + ")", DeviceID=serialNumber,
+                            Unit=(self.outputCurrentUnit), Type=243, Subtype=23).Create()
         if self.outputVoltageUnit not in Devices[serialNumber].Units:
-            Domoticz.Unit(Name="Inverter output voltage (SN: " + serialNumber + ")",
-                            Unit=(self.outputVoltageUnit), Type=243, Subtype=8, DeviceID=serialNumber).Create()
+            Domoticz.Unit(Name="Inverter output voltage (SN: " + serialNumber + ")", DeviceID=serialNumber,
+                            Unit=(self.outputVoltageUnit), Type=243, Subtype=8).Create()
         if self.outputPowerUnit not in Devices[serialNumber].Units:
-            Domoticz.Unit(Name="Inverter output power (SN: " + serialNumber + ")",
+            Domoticz.Unit(Name="Inverter output power (SN: " + serialNumber + ")", DeviceID=serialNumber,
                             Unit=(self.outputPowerUnit), Type=243, Subtype=29,
-                            Switchtype=4, Used=1, DeviceID=serialNumber).Create()
+                            Switchtype=4, Used=1).Create()
                             
         if self.inverterStateUnit not in Devices[serialNumber].Units:
             Options = {"LevelActions": "|||",
@@ -293,12 +293,11 @@ class GoodWeSEMSPlugin:
                             Unit=(self.outputFreq1Unit), TypeName="Custom",
                             Used=0, DeviceID=serialNumber).Create()
         logging.info("finished creating devices, current count: "+str(len(Devices[serialNumber].Units)))
-        if numDevs < len(Devices[serialNumber].Units):
-            if "54200DSN196R0358" in Devices:
-                Domoticz.Debug("Number of Units: " + str(len(Devices[serialNumber].Units)) + ", number of units: " + str(len(Devices["54200DSN196R0358"].Units)) + ")")
-            else:
-                Domoticz.Debug("no Device with Serial Number found")
-            #Domoticz.Log("Number of Devices: " + str(len(Devices[serialNumber].Units)) + ", created for GoodWe inverter (SN: " + serialNumber + ")")
+        if "54200DSN196R0358" in Devices:
+            Domoticz.Debug("Number of Units: " + str(len(Devices[serialNumber].Units)) + ", number of units: " + str(len(Devices["54200DSN196R0358"].Units)) + ")")
+        else:
+            Domoticz.Debug("no Device with Serial Number found")
+        #Domoticz.Log("Number of Devices: " + str(len(Devices[serialNumber].Units)) + ", created for GoodWe inverter (SN: " + serialNumber + ")")
         
 
     def onStart(self):
@@ -602,7 +601,10 @@ def calculateNewEnergy(Device, Unit, inputPower):
         currentCount = 0 #Wh
     dt_format = "%Y-%m-%d %H:%M:%S"
     dt_string = Devices[Device].Units[Unit].LastUpdate
-    lastUpdateDT = datetime.fromtimestamp(time.mktime(time.strptime(dt_string, dt_format)))
+    if len(dt_string) > 0:
+        lastUpdateDT = datetime.fromtimestamp(time.mktime(time.strptime(dt_string, dt_format)))
+    else:
+        lastUpdateDT = datetime.now()
     elapsedTime = datetime.now() - lastUpdateDT
     logging.debug("Test power, previousPower: {}, last update: {:%Y-%m-%d %H:%M}, elapsedTime: {}, elapsedSeconds: {:6.2f}".format(previousPower, lastUpdateDT, elapsedTime, elapsedTime.total_seconds()))
     
@@ -612,7 +614,6 @@ def calculateNewEnergy(Device, Unit, inputPower):
     newCounter = newCount + float(currentCount) #add the amount of energy since last update to the already logged energy
     logging.debug("Test power, previousPower: {}, currentCount: {:6.2f}, newCounter: {:6.2f}, added: {:6.2f}".format(previousPower, float(currentCount), newCounter, newCount))
     return newCounter
-
 
 
 def onStart():
@@ -686,16 +687,16 @@ def UpdateDevice(Device, Unit, nValue, sValue, AlwaysUpdate=False):
     # Make sure that the Domoticz device still exists (they can be deleted) before updating it
     if (Device in Devices):
         logging.debug("Updating device '"+Devices[Device].Units[Unit].Name+ "' with current sValue '"+Devices[Device].Units[Unit].sValue+"' to '" +sValue+"'")
-        if (Devices[Device].Units[Unit].nValue != nValue) or (Devices[Device].Units[Unit].sValue != sValue):
-            try:
+        if (Devices[Device].Units[Unit].nValue != nValue) or (Devices[Device].Units[Unit].sValue != sValue) or AlwaysUpdate:
+            #try:
                 Devices[Device].Units[Unit].nValue = nValue
                 Devices[Device].Units[Unit].sValue = sValue
                 Devices[Device].Units[Unit].Update()
                 
                 logging.debug("Update "+str(nValue)+":'"+str(sValue)+"' ("+Devices[Device].Units[Unit].Name+")")
-            except:
-                Domoticz.Error("Update of device failed: "+str(Unit)+"!")
-                logging.error("Update of device failed: "+str(Unit)+"!")
+            # except:
+                # Domoticz.Error("Update of device failed: "+str(Unit)+"!")
+                # logging.error("Update of device failed: "+str(Unit)+"!")
     return
 
 # Configuration Helpers
