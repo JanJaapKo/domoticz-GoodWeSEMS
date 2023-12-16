@@ -7,7 +7,7 @@ This plugin was created by Dylian94 ([/dylian94/domoticz-GoodWeSEMS](https://git
 
 Important update note (v4)
 ----------------------
-Per version 4 (November 2023), I've updated the plugin to the Domoticz Extend Framework, which means the device definition is changed. To make sure that you still have your origina data, please read the [wiki](https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki).
+Per version 4 (November 2023), I've updated the plugin to the Domoticz Extend Framework, which means the device definition is changed. To make sure that you still have your historical sensor data, please read the [wiki](https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki).
 
 Installation and setup
 ----------------------
