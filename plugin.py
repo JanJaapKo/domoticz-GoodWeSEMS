@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.0.2" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.0.3" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -213,7 +213,7 @@ class GoodWeSEMSPlugin:
 
     def createDevices(self, serialNumber):
         #create domoticz devices
-        logging.info("creating units for device with serial number: "+ serialNumber)
+        logging.debug("creating units for device with serial number: "+ serialNumber)
         thisDevice = Domoticz.Device(DeviceID=serialNumber) #use serial number as identifier for Domoticz.Device instance
         #numDevs = len(Devices[serialNumber].Units)
         if serialNumber not in Devices or self.inverterTemperatureUnit not in Devices[serialNumber].Units:
@@ -293,7 +293,7 @@ class GoodWeSEMSPlugin:
             Domoticz.Unit(Name="Inverter output frequency 1 (SN: " + serialNumber + ")",
                             Unit=(self.outputFreq1Unit), TypeName="Custom",
                             Used=0, DeviceID=serialNumber).Create()
-        logging.info("finished creating devices, current count: "+str(len(Devices[serialNumber].Units)))
+        logging.debug("finished creating devices, current count: "+str(len(Devices[serialNumber].Units)))
         if "54200DSN196R0358" in Devices:
             Domoticz.Debug("Number of Units: " + str(len(Devices[serialNumber].Units)) + ", number of units: " + str(len(Devices["54200DSN196R0358"].Units)) + ")")
         else:

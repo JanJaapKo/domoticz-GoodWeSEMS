@@ -194,13 +194,13 @@ class GoodWe:
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({key : powerStation})
         #Domoticz.Log("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
-        logging.info("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
+        logging.devug("PowerStation created: '" + powerStation.id + "' with key '" + str(key) + "'")
 
     def createStationV2(self, stationData):
         powerStation = PowerStation(stationData=stationData)
         self.powerStationList.update({1 : powerStation})
         #Domoticz.Log("PowerStation created: '" + powerStation.id + "'")
-        logging.info("PowerStation created: '" + powerStation.id + "'")
+        logging.debug("PowerStation created: '" + powerStation.id + "'")
     
     def apiRequestHeaders(self):
         logging.debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
