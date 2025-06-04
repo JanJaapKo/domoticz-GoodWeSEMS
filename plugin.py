@@ -143,10 +143,11 @@ class GoodWeSEMSPlugin:
             self.devicesUpdated = False
             try:
                 self.goodWeAccount.tokenRequest()
+                return True
             except (exceptions.GoodweException, exceptions.FailureWithMessage, exceptions.FailureWithoutMessage) as exp:
                 logging.error("Failed to request data: " + str(exp))
                 Domoticz.Error("Failed to request data: " + str(exp))
-                return
+                return False
 
     def getDeviceData(self):            
         if self.goodWeAccount.tokenAvailable:
@@ -155,12 +156,14 @@ class GoodWeSEMSPlugin:
             except (exceptions.TooManyRetries, exceptions.FailureWithErrorCode, exceptions.FailureWithoutErrorCode) as exp:
                 logging.error("Failed to request data: " + str(exp))
                 Domoticz.Error("Failed to request data: " + str(exp))
-                return
+                return None
             return DeviceData
 
     def startDeviceUpdateV2(self):
-        self.establishToken()
+        if not self.establishToken(): return
         DeviceData = self.getDeviceData()
+        if DeviceData == None:
+            return
         self.goodWeAccount.createStationV2(DeviceData)
         self.updateDevices(DeviceData)
 
