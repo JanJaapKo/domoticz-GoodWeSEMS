@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.1.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.2.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
@@ -148,6 +148,8 @@ class GoodWeSEMSPlugin:
                 logging.error("Failed to request data: " + str(exp))
                 Domoticz.Error("Failed to request data: " + str(exp))
                 return False
+        else:
+            return True
 
     def getDeviceData(self):            
         if self.goodWeAccount.tokenAvailable:
@@ -160,9 +162,14 @@ class GoodWeSEMSPlugin:
             return DeviceData
 
     def startDeviceUpdateV2(self):
-        if not self.establishToken(): return
+        if self.establishToken() == False:
+            logging.error("token not established")
+            Domoticz.Error("token not established")
+            return
         DeviceData = self.getDeviceData()
         if DeviceData == None:
+            logging.error("DeviceData == None")
+            Domoticz.Error("DeviceData == None")
             return
         self.goodWeAccount.createStationV2(DeviceData)
         self.updateDevices(DeviceData)
@@ -379,11 +386,6 @@ class GoodWeSEMSPlugin:
             logging.info("Failed to connect (" + str(Status) + ") to: " + Parameters["Address"] + ":" + Parameters[
                 "Port"] + " with error: " + Description)
 
-    def onMessage(self, Connection, Data):
-        logging.debug("onMessage: data received: Data : '" + str(Data) + "'")
-        Domoticz.Error("onMessage called unexpectedly: data received: Data : '" + str(Data) + "'")
-        return
-
     def onCommand(self, DeviceID, Unit, Command, Level, Hue):
         logging.debug("onCommand called for Device '" + str(DeviceID) + "', Unit '" + str(Unit) + "': Parameter '" + str(Command) + "', Level: " + str(Level))
         if Unit == self.inverterStateCommand:
@@ -461,7 +463,6 @@ class GoodWeSEMSPlugin:
         setConfigItem(Key="patchVersion", Value=patch)
         setConfigItem(Key="plugin version", Value="{0}.{1}.{2}".format(major, minor, patch))
 
-
 global _plugin
 _plugin = GoodWeSEMSPlugin()
 
@@ -489,7 +490,6 @@ def calculateNewEnergy(Device, Unit, inputPower):
     logging.debug("Test power, previousPower: {}, currentCount: {:6.2f}, newCounter: {:6.2f}, added: {:6.2f}".format(previousPower, float(currentCount), newCounter, newCount))
     return newCounter
 
-
 def onStart():
     global _plugin
     _plugin.onStart()
@@ -501,10 +501,6 @@ def onStop():
 def onConnect(Connection, Status, Description):
     global _plugin
     _plugin.onConnect(Connection, Status, Description)
-
-def onMessage(Connection, Data):
-    global _plugin
-    _plugin.onMessage(Connection, Data)
 
 def onCommand(DeviceID, Unit, Command, Level, Color):
     global _plugin
