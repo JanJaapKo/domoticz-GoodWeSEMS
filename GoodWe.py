@@ -42,7 +42,6 @@ class Inverter:
     A class to describe the methods and properties of a GoodWe inverter
     """
     domoticzDevices = 20
-    
     inverterTemperatureUnit = 1
     inverterStateUnit = 9
     outputCurrentUnit = 2
@@ -107,7 +106,6 @@ class PowerStation:
     
     def createInverters(self, inverterData):
         for inverter in inverterData:
-            #self.inverters[inverter['sn']] = Inverter(inverter, self._firstDevice)
             self.inverters[inverter['sn']] = Inverter(inverter)
             logging.debug("inverter created: '" + str(inverter['sn']) + "'")
             self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
@@ -133,7 +131,8 @@ class PowerStation:
         self._firstDevice = val
         
     def maxDeviceNum(self):
-        for inv in self.inverters:
+        _maxDeviceNum = 0
+        for inv in self.inverters.values():
             _maxDeviceNum += inv.domoticzDevices
         return _maxDeviceNum
 
@@ -214,23 +213,38 @@ class GoodWe:
             self.tokenAvailable = False
             return
 
-        if apiResponse["code"] == 100005:
+        try:
+            with open("/tmp/goodwe_token_response.json", "w") as f:
+                json.dump(apiResponse, f, indent=2)
+            logging.info("Saved raw token response to /tmp/goodwe_token_response.json")
+        except Exception as exp:
+            logging.error("Failed to save token response: " + str(exp))
+
+        if apiResponse.get("code") == 100005:
             raise exceptions.GoodweException("invalid password or username")
-        if 'api' not in apiResponse and 'msg' in apiResponse:
-            raise exceptions.FailureWithMessage(apiResponse['msg'])
-        if 'api' not in apiResponse and 'msg' not in apiResponse:
-            raise exceptions.FailureWithoutMessage(apiResponse['msg'])
 
-        apiUrl = apiResponse["components"]["api"]
+        # Adaptation robuste pour trouver l'URL API
+        apiUrl = None
+        if "components" in apiResponse and "api" in apiResponse["components"]:
+            apiUrl = apiResponse["components"]["api"]
+        elif "data" in apiResponse and "api" in apiResponse["data"]:
+            apiUrl = apiResponse["data"]["api"]
+        elif "api" in apiResponse:
+            apiUrl = apiResponse["api"]
 
+        if not apiUrl:
+            logging.error("Unexpected API response, no 'api' key: %s", apiResponse)
+            Domoticz.Error("Unexpected API response, no 'api' key")
+            self.tokenAvailable = False
+            return
         if apiResponse == 'Null':
             logging.info("SEMS API Token not received")
             self.tokenAvailable = False
         else:
-            self.token = apiResponse['data']
+            self.token = apiResponse.get('data', {})
             logging.debug("SEMS API Token received: " + json.dumps(self.token))
             self.tokenAvailable = True
-            self.base_url = apiResponse['api']
+            self.base_url = apiUrl
         
         return r.status_code
 
