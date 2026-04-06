@@ -86,6 +86,7 @@ except ImportError:
     from fakeDomoticz import Domoticz
     Domoticz = Domoticz()
     debug = True
+import os
 import sys, time
 from datetime import datetime, timedelta
 from GoodWe import GoodWe
@@ -337,20 +338,33 @@ class GoodWeSEMSPlugin:
     def onStart(self):
         self.logger = logging.getLogger('root')
         self.log_filename = "goodwe "+Parameters["Name"]+".log"
+        log_format = '%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s'
+        root_logger = logging.getLogger()
+        if Parameters["Mode6"] in ("Verbose", "Debug"):
+            root_logger.setLevel(logging.DEBUG)
+        else:
+            root_logger.setLevel(logging.INFO)
+
+        # Ensure a file handler is always created for this plugin log file.
+        for handler in list(root_logger.handlers):
+            if isinstance(handler, logging.FileHandler) and os.path.abspath(getattr(handler, 'baseFilename', '')) == os.path.abspath(self.log_filename):
+                root_logger.removeHandler(handler)
+        file_handler = logging.FileHandler(self.log_filename)
+        file_handler.setFormatter(logging.Formatter(log_format))
+        file_handler.setLevel(root_logger.level)
+        root_logger.addHandler(file_handler)
+
         if Parameters["Mode6"] == "Verbose":
             Domoticz.Debugging(1)
-            logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename=self.log_filename,level=logging.DEBUG)
             Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
             DumpConfigToLog()
         elif Parameters["Mode6"] == "Debug":
             Domoticz.Debugging(2)
-            logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename=self.log_filename,level=logging.DEBUG)
             Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
             DumpConfigToLog()
         else:
-            logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename=self.log_filename,level=logging.INFO)
             Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
-        
+
         logging.info("starting plugin version "+Parameters["Version"])
 
         #check upgrading of version needs actions
