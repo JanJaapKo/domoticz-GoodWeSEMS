@@ -217,6 +217,7 @@ class GoodWe:
             with open("/tmp/goodwe_token_response.json", "w") as f:
                 json.dump(apiResponse, f, indent=2)
             logging.info("Saved raw token response to /tmp/goodwe_token_response.json")
+            logging.debug("toke response: '"+apiResponse+"'")
         except Exception as exp:
             logging.error("Failed to save token response: " + str(exp))
 

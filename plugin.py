@@ -17,11 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.2.1" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.0.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
-        <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
-        <p>Version: 4.0.1</p>
+        <p>This plugin uses the GoodWe SEMS PLUS api to retrieve the status information of your GoodWe inverter.</p>
+        <p>This version will repalce the old one per MAy 2026</p>
+        <p>Version: 5.0.0</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -127,14 +128,6 @@ class GoodWeSEMSPlugin:
         self.inverterStateCommand = 19 + startNum
         self.enabled = False
         return
-
-    def apiConnection(self):
-        if Parameters["Port"] == "443":
-            return Domoticz.Connection(Name="SEMS Portal API", Transport="TCP/IP", Protocol="HTTPS",
-                                       Address=Parameters["Address"], Port=Parameters["Port"])
-        else:
-            return Domoticz.Connection(Name="SEMS Portal API", Transport="TCP/IP", Protocol="HTTP",
-                                       Address=Parameters["Address"], Port=Parameters["Port"])
 
     def establishToken(self):
         logging.debug("establishToken, token availability: '" + str(self.goodWeAccount.tokenAvailable)+ "'")
