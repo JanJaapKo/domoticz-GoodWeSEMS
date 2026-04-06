@@ -67,6 +67,12 @@
         <param field="Mode3" label="Peak power [W]" width="300px">
             <description>Optional: Peak power, supply values (separated by ';'): total power; power per string</description>
         </param>
+        <param field="Mode4" label="use SEMS + API" width="75px">
+            <options>
+                <option label="No" value="No" default="true"/>
+                <option label="Yes" value="Yes"/>
+            </options>
+        </param>
         <param field="Mode6" label="Log level" width="75px">
             <options>
                 <option label="Verbose" value="Verbose"/>
@@ -90,8 +96,7 @@ except ImportError:
 import os
 import sys, time
 from datetime import datetime, timedelta
-from GoodWe import GoodWe
-from GoodWe import PowerStation
+from GoodWe import GoodWe, GoodWeSEMSPlus
 import exceptions
 import logging
 
@@ -365,7 +370,10 @@ class GoodWeSEMSPlugin:
         if not self.enabled:
             return False
 
-        self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
+        if Parameters["Mode4"] == "Yes":
+            self.goodWeAccount = GoodWeSEMSPlus(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
+        else:
+            self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
         self.runAgain = int(Parameters["Mode2"])
 
         if len(Parameters["Mode1"]) == 0:

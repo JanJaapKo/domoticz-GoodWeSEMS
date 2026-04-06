@@ -326,4 +326,47 @@ class GoodWe:
             return False
         logging.debug("response inverter mode post : " + json.dumps(r.json()))
         return apiResponse
+
+
+class GoodWeSEMSPlus(GoodWe):
+    """
+    A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
+    """
+
+    def tokenRequest(self):
+        logging.debug("build SEMS+ tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password + "'")
+        url = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
+        headers = {"Content-Type": "application/json", "User-Agent": "GoodWe SEMS API"}
+        data = json.dumps({"account": self.Username, "pwd": self.Password})
+
+        try:
+            r = requests.post(url, headers=headers, data=data, timeout=30)
+        except requests.exceptions.RequestException as exp:
+            logging.error("SEMS+ TokenRequestException: " + str(exp))
+            Domoticz.Error("SEMS+ TokenRequestException: " + str(exp))
+            self.tokenAvailable = False
+            return
+
+        logging.debug("building SEMS+ token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS+ TokenRequest JSONDecodeError: " + str(exp))
+            Domoticz.Error("SEMS+ TokenRequest JSONDecodeError: " + str(exp))
+            self.tokenAvailable = False
+            return
+
+        if apiResponse.get("code") == 0:
+            self.token = apiResponse.get("data", {})
+            logging.debug("SEMS+ API Token received: " + json.dumps(self.token))
+            self.tokenAvailable = True
+            # For SEMS+, set base_url to the SEMS+ base
+            self.base_url = "https://semsplus.goodwe.com"
+        else:
+            msg = apiResponse.get("msg", "Unknown error")
+            logging.error("SEMS+ Token request failed: " + str(msg))
+            Domoticz.Error("SEMS+ Token request failed: " + str(msg))
+            self.tokenAvailable = False
+
+        return r.status_code
         
