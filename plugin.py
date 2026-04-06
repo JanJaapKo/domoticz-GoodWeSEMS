@@ -356,14 +356,13 @@ class GoodWeSEMSPlugin:
 
         if Parameters["Mode6"] == "Verbose":
             Domoticz.Debugging(1)
-            Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
+            #Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
             DumpConfigToLog()
         elif Parameters["Mode6"] == "Debug":
             Domoticz.Debugging(2)
-            Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
+            #Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
             DumpConfigToLog()
-        else:
-            Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
+        Domoticz.Status("Starting Goodwe SEMS API plugin, logging to file {0}".format(self.log_filename))
 
         logging.info("starting plugin version "+Parameters["Version"])
 
