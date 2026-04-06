@@ -217,7 +217,7 @@ class GoodWe:
             with open("/tmp/goodwe_token_response.json", "w") as f:
                 json.dump(apiResponse, f, indent=2)
             logging.info("Saved raw token response to /tmp/goodwe_token_response.json")
-            logging.debug("token response: '"+apiResponse+"'")
+            logging.debug("token response: " + json.dumps(apiResponse))
         except Exception as exp:
             logging.error("Failed to save token response: " + str(exp))
 
@@ -356,7 +356,7 @@ class GoodWeSEMSPlus(GoodWe):
             self.tokenAvailable = False
             return
 
-        logging.debug("token response: '"+apiResponse+"'")
+        logging.debug("SEMS+ token response: " + json.dumps(apiResponse))
 
         if apiResponse.get("code") == 0:
             self.token = apiResponse.get("data", {})
