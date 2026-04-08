@@ -335,7 +335,7 @@ class GoodWeSEMSPlus(GoodWe):
 
     def tokenRequest(self):
         logging.debug("build SEMS+ tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password + "'")
-        url = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
+        url = "https://eu.semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
         headers = {"Content-Type": "application/json", "User-Agent": "GoodWe SEMS API"}
         data = json.dumps({"account": self.Username, "pwd": self.Password})
 
@@ -365,9 +365,19 @@ class GoodWeSEMSPlus(GoodWe):
             # For SEMS+, set base_url to the SEMS+ base
             self.base_url = "https://semsplus.goodwe.com"
         else:
-            msg = apiResponse.get("msg", "Unknown error")
-            logging.error("SEMS+ Token request failed: " + str(msg))
-            Domoticz.Error("SEMS+ Token request failed: " + str(msg))
+            error_code = apiResponse.get("code")
+            error_description = apiResponse.get("description", apiResponse.get("msg", "Unknown error"))
+            
+            if error_code == "U0153":
+                logging.error("SEMS+ Token request failed - Account temporarily locked: " + error_description)
+                Domoticz.Error("SEMS+ Token request failed - Account temporarily locked: " + error_description)
+            elif error_code == "100005":
+                logging.error("SEMS+ Token request failed - Incorrect password: " + error_description)
+                Domoticz.Error("SEMS+ Token request failed - Incorrect password: " + error_description)
+            else:
+                logging.error("SEMS+ Token request failed: " + error_description)
+                Domoticz.Error("SEMS+ Token request failed: " + error_description)
+            
             self.tokenAvailable = False
 
         return r.status_code
