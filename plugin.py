@@ -413,6 +413,11 @@ class GoodWeSEMSPlugin:
 
     def onHeartbeat(self):
         if self.enabled:
+            # Skip polling when SEMS+ API is selected but not yet implemented
+            if Parameters["Mode4"] == "Yes":
+                logging.debug("SEMS+ API selected but not yet implemented, skipping heartbeat polling")
+                return
+                
             if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
                 logging.debug("onHeartbeat called, Connection is alive.")
             elif len(Parameters["Mode1"]) == 0:
