@@ -335,7 +335,7 @@ class GoodWeSEMSPlus(GoodWe):
 
     def tokenRequest(self):
         logging.debug("build SEMS+ tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password + "'")
-        url = "https://eu.semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
+        url = "https://eu-semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
         headers = {"Content-Type": "application/json", "User-Agent": "GoodWe SEMS API"}
         data = json.dumps({"account": self.Username, "pwd": self.Password})
 
