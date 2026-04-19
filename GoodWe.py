@@ -29,6 +29,8 @@ import requests
 import time
 import exceptions
 import logging
+import hashlib
+import base64
 
 try:
     import DomoticzEx as Domoticz
@@ -337,7 +339,10 @@ class GoodWeSEMSPlus(GoodWe):
         logging.debug("build SEMS+ tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password + "'")
         url = "https://eu-semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
         headers = {"Content-Type": "application/json", "User-Agent": "GoodWe SEMS API"}
-        data = json.dumps({"account": self.Username, "pwd": self.Password})
+        # MD5 hash the password hex and then Base64 encode the hex string
+        md5_hex = hashlib.md5(self.Password.encode("utf-8")).hexdigest()
+        pwd_encoded = base64.b64encode(md5_hex.encode("utf-8")).decode("utf-8")
+        data = json.dumps({"account": self.Username, "pwd": pwd_encoded})
 
         try:
             r = requests.post(url, headers=headers, data=data, timeout=30)
