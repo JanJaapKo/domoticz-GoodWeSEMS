@@ -363,12 +363,12 @@ class GoodWeSEMSPlus(GoodWe):
 
         logging.debug("SEMS+ token response: " + json.dumps(apiResponse))
 
-        if apiResponse.get("code") == 0:
+        if apiResponse.get("code") == "00000":
             self.token = apiResponse.get("data", {})
             logging.debug("SEMS+ API Token received: " + json.dumps(self.token))
             self.tokenAvailable = True
-            # For SEMS+, set base_url to the SEMS+ base
-            self.base_url = "https://semsplus.goodwe.com"
+            # Extract base_url from response
+            self.base_url = self.token.get("api", "https://eu-gateway.semsportal.com/web/sems")
         else:
             error_code = apiResponse.get("code")
             error_description = apiResponse.get("description", apiResponse.get("msg", "Unknown error"))
