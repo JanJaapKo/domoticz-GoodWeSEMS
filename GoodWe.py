@@ -169,7 +169,7 @@ class GoodWe:
         self.Port = Port
         self.Username = User
         self.Password = Password
-        self.base_url = self.Address
+        self.base_url = self.Address + "/v2"
         self.token = self.default_token
         return
 
@@ -191,7 +191,7 @@ class GoodWe:
 
     def tokenRequest(self):
         logging.debug("build tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password +"'")
-        url = '/v2/Common/CrossLogin'
+        url = '/Common/CrossLogin'
         loginPayload = {
             'account': self.Username,
             'pwd': self.Password,
@@ -253,7 +253,7 @@ class GoodWe:
 
     def stationListRequest(self):
         logging.debug("build stationListRequest")
-        url = 'v2/HistoryData/QueryPowerStationByHistory'
+        url = '/HistoryData/QueryPowerStationByHistory'
         r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), timeout=5)
  
         logging.debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
@@ -290,7 +290,7 @@ class GoodWe:
             raise exceptions.TooManyRetries
 
     def stationDataRequest(self, stationId):
-        url = 'v2/PowerStation/GetMonitorDetailByPowerstationId'
+        url = '/PowerStation/GetMonitorDetailByPowerstationId'
         payload = {
             'powerStationId' : stationId
         }
@@ -310,7 +310,7 @@ class GoodWe:
         # control inverter going on or off
         # mode 1: ON
         # mode 2: OFF
-        url = 'PowerStation/SaveRemoteControlInverter'
+        url = '/PowerStation/SaveRemoteControlInverter'
         payload = {
             "inverterSN": inverterSn,
             'powerStationId' : stationId,
@@ -368,7 +368,7 @@ class GoodWeSEMSPlus(GoodWe):
             logging.debug("SEMS+ API Token received: " + json.dumps(self.token))
             self.tokenAvailable = True
             # Extract base_url from response
-            self.base_url = self.token.get("api", "https://eu-gateway.semsportal.com/web/sems")
+            self.base_url = self.token.get("api", "https://eu-gateway.semsportal.com/web/sems") + "/v3"
         else:
             error_code = apiResponse.get("code")
             error_description = apiResponse.get("description", apiResponse.get("msg", "Unknown error"))
