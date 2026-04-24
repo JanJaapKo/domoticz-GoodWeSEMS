@@ -169,7 +169,7 @@ class GoodWe:
         self.Port = Port
         self.Username = User
         self.Password = Password
-        self.base_url = self.Address + "/v2"
+        self.base_url = self.Address 
         self.token = self.default_token
         return
 
@@ -191,7 +191,7 @@ class GoodWe:
 
     def tokenRequest(self):
         logging.debug("build tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password +"'")
-        url = '/Common/CrossLogin'
+        url = '/v2/Common/CrossLogin'
         loginPayload = {
             'account': self.Username,
             'pwd': self.Password,
@@ -247,7 +247,7 @@ class GoodWe:
             self.token = apiResponse.get('data', {})
             logging.debug("SEMS API Token received: " + json.dumps(self.token))
             self.tokenAvailable = True
-            self.base_url = apiUrl
+            self.base_url = apiUrl + "/v2"
         
         return r.status_code
 
