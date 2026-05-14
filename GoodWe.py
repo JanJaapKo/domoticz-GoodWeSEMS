@@ -353,6 +353,54 @@ class GoodWeSEMSPlus(GoodWe):
     A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
     """
 
+    def _is_powerstation_route(self, url_part):
+        """Return whether the route should use the legacy PowerStation host."""
+        return url_part.startswith("/PowerStation") or url_part.startswith("/v3/PowerStation")
+
+    def _extract_gateway_region(self, api_base):
+        """Return the SEMS region prefix from a gateway API base."""
+        host = api_base.split("//", 1)[-1].split("/", 1)[0]
+        if host.endswith("-gateway.semsportal.com"):
+            return host.removesuffix("-gateway.semsportal.com") or None
+        if host.endswith(".semsportal.com"):
+            return host.split(".", 1)[0] or None
+        return None
+
+    def _normalize_powerstation_api_base(self, api_base, url_part):
+        """Return the effective API base for PowerStation requests."""
+        if not self._is_powerstation_route(url_part):
+            return api_base
+        if "/web/sems" not in api_base and "/sems/" not in api_base:
+            return api_base
+
+        region = None
+        if isinstance(self.token, dict) and isinstance(self.token.get("region"), str):
+            region = self.token["region"] or None
+        if region is None:
+            region = self._extract_gateway_region(api_base)
+
+        if region:
+            rewritten_base = f"https://{region}.semsportal.com/api"
+            logging.debug(
+                "SEMS - Rewriting API base from %s to %s for %s",
+                api_base,
+                rewritten_base,
+                url_part,
+            )
+            return rewritten_base
+
+        logging.debug(
+            "SEMS - Rewriting API base from %s to %s for %s",
+            api_base,
+            _LegacyApiFallback,
+            url_part,
+        )
+        return _LegacyApiFallback
+
+    def _resolve_api_base_for_url_part(self, api_base, url_part):
+        """Return the effective API base for a given endpoint path."""
+        return self._normalize_powerstation_api_base(api_base, url_part)
+
     def _hash_password_for_new_login(self, password):
         md5_hex = hashlib.md5(password.encode("utf-8")).hexdigest()
         return base64.b64encode(md5_hex.encode("utf-8")).decode("utf-8")
@@ -469,7 +517,8 @@ class GoodWeSEMSPlus(GoodWe):
             'powerStationId': stationId
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url)
+        r = requests.post(api_base + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
         logging.debug("building SEMS+ station data request on URL: %s which returned status code: %s and response length = %s", r.url, r.status_code, len(r.text))
         try:
             apiResponse = r.json()
@@ -489,7 +538,8 @@ class GoodWeSEMSPlus(GoodWe):
             'InverterStatus': mode
         }
 
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url)
+        r = requests.post(api_base + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
         logging.debug("building SEMS+ inverter mode post on URL: %s and payload: '%s' which returned status code: %s and response length = %s", r.url, str(payload), r.status_code, len(r.text))
         try:
             apiResponse = r.json()
