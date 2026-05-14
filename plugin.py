@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.0.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.1.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS api to retrieve the status information of your GoodWe inverter.</p>
@@ -414,9 +414,9 @@ class GoodWeSEMSPlugin:
     def onHeartbeat(self):
         if self.enabled:
             # Skip polling when SEMS+ API is selected but not yet implemented
-            if Parameters["Mode4"] == "Yes":
-                logging.debug("SEMS+ API selected but not yet implemented, skipping heartbeat polling")
-                return
+            # if Parameters["Mode4"] == "Yes":
+                # logging.debug("SEMS+ API selected but not yet implemented, skipping heartbeat polling")
+                # return
                 
             if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
                 logging.debug("onHeartbeat called, Connection is alive.")
