@@ -29,6 +29,26 @@ import requests
 import time
 import exceptions
 import logging
+import hashlib
+import base64
+
+OLD_LOGIN_URL = "https://www.semsportal.com/api/v3/Common/CrossLogin"
+NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
+_PowerStationURLPart = "/v3/PowerStation/GetMonitorDetailByPowerstationId"
+_PowerControlURLPart = "/PowerStation/SaveRemoteControlInverter"
+_RequestTimeout = 30
+_SuccessCodes = {0, "0", "00000"}
+_NewLoginHeaders = {
+    "Content-Type": "application/json",
+    "Accept": "application/json, */*;q=0.5",
+}
+_DefaultHeaders = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "token": '{"version":"3.1.1","client":"ios","language":"en"}',
+}
+_NewLoginFallbackApi = "https://eu-gateway.semsportal.com/web/sems"
+_LegacyApiFallback = "https://eu.semsportal.com/api"
 
 try:
     import DomoticzEx as Domoticz
@@ -167,7 +187,7 @@ class GoodWe:
         self.Port = Port
         self.Username = User
         self.Password = Password
-        self.base_url = self.Address
+        self.base_url = self.Address 
         self.token = self.default_token
         return
 
@@ -217,6 +237,7 @@ class GoodWe:
             with open("/tmp/goodwe_token_response.json", "w") as f:
                 json.dump(apiResponse, f, indent=2)
             logging.info("Saved raw token response to /tmp/goodwe_token_response.json")
+            logging.debug("token response: " + json.dumps(apiResponse))
         except Exception as exp:
             logging.error("Failed to save token response: " + str(exp))
 
@@ -244,13 +265,13 @@ class GoodWe:
             self.token = apiResponse.get('data', {})
             logging.debug("SEMS API Token received: " + json.dumps(self.token))
             self.tokenAvailable = True
-            self.base_url = apiUrl
+            self.base_url = apiUrl + "/v2"
         
         return r.status_code
 
     def stationListRequest(self):
         logging.debug("build stationListRequest")
-        url = 'v2/HistoryData/QueryPowerStationByHistory'
+        url = '/HistoryData/QueryPowerStationByHistory'
         r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), timeout=5)
  
         logging.debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
@@ -287,7 +308,7 @@ class GoodWe:
             raise exceptions.TooManyRetries
 
     def stationDataRequest(self, stationId):
-        url = 'v2/PowerStation/GetMonitorDetailByPowerstationId'
+        url = '/PowerStation/GetMonitorDetailByPowerstationId'
         payload = {
             'powerStationId' : stationId
         }
@@ -307,7 +328,7 @@ class GoodWe:
         # control inverter going on or off
         # mode 1: ON
         # mode 2: OFF
-        url = 'PowerStation/SaveRemoteControlInverter'
+        url = '/PowerStation/SaveRemoteControlInverter'
         payload = {
             "inverterSN": inverterSn,
             'powerStationId' : stationId,
@@ -324,5 +345,208 @@ class GoodWe:
             Domoticz.Error("RequestException: " + str(exp))
             return False
         logging.debug("response inverter mode post : " + json.dumps(r.json()))
+        return apiResponse
+
+
+class GoodWeSEMSPlus(GoodWe):
+    """
+    A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
+    """
+
+    def _is_powerstation_route(self, url_part):
+        """Return whether the route should use the legacy PowerStation host."""
+        return url_part.startswith("/PowerStation") or url_part.startswith("/v3/PowerStation")
+
+    def _extract_gateway_region(self, api_base):
+        """Return the SEMS region prefix from a gateway API base."""
+        host = api_base.split("//", 1)[-1].split("/", 1)[0]
+        if host.endswith("-gateway.semsportal.com"):
+            return host.removesuffix("-gateway.semsportal.com") or None
+        if host.endswith(".semsportal.com"):
+            return host.split(".", 1)[0] or None
+        return None
+
+    def _normalize_powerstation_api_base(self, api_base, url_part):
+        """Return the effective API base for PowerStation requests."""
+        if not self._is_powerstation_route(url_part):
+            return api_base
+        if "/web/sems" not in api_base and "/sems/" not in api_base:
+            return api_base
+
+        region = None
+        if isinstance(self.token, dict) and isinstance(self.token.get("region"), str):
+            region = self.token["region"] or None
+        if region is None:
+            region = self._extract_gateway_region(api_base)
+
+        if region:
+            rewritten_base = f"https://{region}.semsportal.com/api"
+            logging.debug(
+                "SEMS - Rewriting API base from %s to %s for %s",
+                api_base,
+                rewritten_base,
+                url_part,
+            )
+            return rewritten_base
+
+        logging.debug(
+            "SEMS - Rewriting API base from %s to %s for %s",
+            api_base,
+            _LegacyApiFallback,
+            url_part,
+        )
+        return _LegacyApiFallback
+
+    def _resolve_api_base_for_url_part(self, api_base, url_part):
+        """Return the effective API base for a given endpoint path."""
+        return self._normalize_powerstation_api_base(api_base, url_part)
+
+    def _hash_password_for_new_login(self, password):
+        md5_hex = hashlib.md5(password.encode("utf-8")).hexdigest()
+        return base64.b64encode(md5_hex.encode("utf-8")).decode("utf-8")
+
+    def _extract_login_token(self, apiResponse, fallback_api_url=None):
+        if not isinstance(apiResponse, dict):
+            logging.error("SEMS login response invalid: %s", apiResponse)
+            Domoticz.Error("SEMS login response invalid")
+            return None
+        code = apiResponse.get("code")
+        if code not in _SuccessCodes:
+            err_msg = apiResponse.get("msg", apiResponse.get("description", "Unknown error"))
+            logging.error(
+                "SEMS login failed with code: %s, msg: %s, description: %s",
+                code,
+                apiResponse.get("msg"),
+                apiResponse.get("description"),
+            )
+            Domoticz.Error(f"SEMS login failed with code: {code}, msg: {err_msg}")
+            return None
+        token_data = apiResponse.get("data")
+        if not isinstance(token_data, dict) or not token_data:
+            logging.error("SEMS login response missing or invalid token data: %s", apiResponse)
+            Domoticz.Error("SEMS login response missing or invalid token data")
+            return None
+
+        api_url = apiResponse.get("api") if isinstance(apiResponse.get("api"), str) else token_data.get("api")
+        if not api_url:
+            api_url = fallback_api_url
+        if not api_url:
+            logging.error("SEMS login response missing api url: %s", apiResponse)
+            Domoticz.Error("SEMS login response missing api url")
+            return None
+
+        token_dict = dict(token_data)
+        token_dict["api"] = api_url
+        if not token_dict.get("token"):
+            logging.error("SEMS login response missing token field: %s", apiResponse)
+            Domoticz.Error("SEMS login response missing token field")
+            return None
+        return token_dict
+
+    def _get_new_login_token(self):
+        login_data = {
+            "account": self.Username,
+            "pwd": self._hash_password_for_new_login(self.Password),
+            "agreement": 1,
+            "isChinese": False,
+            "isLocal": False,
+        }
+        try:
+            r = requests.post(NEW_LOGIN_URL, headers=_NewLoginHeaders, json=login_data, timeout=_RequestTimeout)
+        except requests.exceptions.RequestException as exp:
+            logging.error("SEMS+ new login request failed: %s", exp)
+            Domoticz.Error("SEMS+ new login request failed: " + str(exp))
+            return None
+
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS+ new login JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS+ new login JSONDecodeError: " + str(exp))
+            return None
+
+        return self._extract_login_token(apiResponse, _NewLoginFallbackApi)
+
+    def _get_legacy_login_token(self):
+        login_data = json.dumps({"account": self.Username, "pwd": self.Password})
+        try:
+            r = requests.post(OLD_LOGIN_URL, headers=_DefaultHeaders, data=login_data, timeout=_RequestTimeout)
+        except requests.exceptions.RequestException as exp:
+            logging.error("SEMS legacy login request failed: %s", exp)
+            Domoticz.Error("SEMS legacy login request failed: " + str(exp))
+            return None
+
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS legacy login JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS legacy login JSONDecodeError: " + str(exp))
+            return None
+
+        return self._extract_login_token(apiResponse, _LegacyApiFallback)
+
+    def apiRequestHeadersV2(self):
+        logging.debug("build SEMS+ apiRequestHeaders with token: '%s'", json.dumps(self.token))
+        return {
+            'User-Agent': 'Domoticz/1.0',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'token': json.dumps(self.token)
+        }
+
+    def tokenRequest(self):
+        logging.debug("build SEMS+ tokenRequest with username: '%s'", self.Username)
+        token_data = self._get_new_login_token()
+        if token_data is None:
+            logging.info("SEMS+ new login failed, trying legacy SEMS login")
+            token_data = self._get_legacy_login_token()
+
+        if token_data is None:
+            self.tokenAvailable = False
+            return
+
+        self.token = token_data
+        self.tokenAvailable = True
+        self.base_url = self.token.get("api")
+        logging.debug("SEMS+ API Token received: %s", json.dumps(self.token))
+        return 200
+
+    def stationDataRequest(self, stationId):
+        url = _PowerStationURLPart
+        payload = {
+            'powerStationId': stationId
+        }
+
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url)
+        r = requests.post(api_base + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
+        logging.debug("building SEMS+ station data request on URL: %s which returned status code: %s and response length = %s", r.url, r.status_code, len(r.text))
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS+ station data request JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS+ station data request JSONDecodeError: " + str(exp))
+            return False
+        logging.debug("response station data request : %s", json.dumps(apiResponse))
+        return apiResponse
+
+    def setInverterStatus(self, stationId, inverterSn, mode):
+        url = _PowerControlURLPart
+        payload = {
+            "InverterSN": inverterSn,
+            'powerStationId': stationId,
+            'InverterStatusSettingMark': 1,
+            'InverterStatus': mode
+        }
+
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url)
+        r = requests.post(api_base + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
+        logging.debug("building SEMS+ inverter mode post on URL: %s and payload: '%s' which returned status code: %s and response length = %s", r.url, str(payload), r.status_code, len(r.text))
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS+ inverter mode post JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS+ inverter mode post JSONDecodeError: " + str(exp))
+            return False
+        logging.debug("response inverter mode post : %s", json.dumps(apiResponse))
         return apiResponse
         

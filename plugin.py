@@ -17,11 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="4.2.1" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.2.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
-        <p>This plugin uses the GoodWe SEMS api to retrieve the status information of your GoodWe inverter.</p>
-        <p>Version: 4.0.1</p>
+        <p>This plugin uses the GoodWe SEMS PLUS api to retrieve the status information of your GoodWe inverter.</p>
+        <p>This version will repalce the old one per MAy 2026</p>
+        <p>Version: 5.0.0</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -66,6 +67,12 @@
         <param field="Mode3" label="Peak power [W]" width="300px">
             <description>Optional: Peak power, supply values (separated by ';'): total power; power per string</description>
         </param>
+        <param field="Mode4" label="use SEMS + API" width="75px">
+            <options>
+                <option label="No" value="No" />
+                <option label="Yes" value="Yes" default="true"/>
+            </options>
+        </param>
         <param field="Mode6" label="Log level" width="75px">
             <options>
                 <option label="Verbose" value="Verbose"/>
@@ -89,8 +96,7 @@ except ImportError:
 import os
 import sys, time
 from datetime import datetime, timedelta
-from GoodWe import GoodWe
-from GoodWe import PowerStation
+from GoodWe import GoodWe, GoodWeSEMSPlus
 import exceptions
 import logging
 
@@ -127,14 +133,6 @@ class GoodWeSEMSPlugin:
         self.inverterStateCommand = 19 + startNum
         self.enabled = False
         return
-
-    def apiConnection(self):
-        if Parameters["Port"] == "443":
-            return Domoticz.Connection(Name="SEMS Portal API", Transport="TCP/IP", Protocol="HTTPS",
-                                       Address=Parameters["Address"], Port=Parameters["Port"])
-        else:
-            return Domoticz.Connection(Name="SEMS Portal API", Transport="TCP/IP", Protocol="HTTP",
-                                       Address=Parameters["Address"], Port=Parameters["Port"])
 
     def establishToken(self):
         logging.debug("establishToken, token availability: '" + str(self.goodWeAccount.tokenAvailable)+ "'")
@@ -372,7 +370,10 @@ class GoodWeSEMSPlugin:
         if not self.enabled:
             return False
 
-        self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
+        if Parameters["Mode4"] == "Yes":
+            self.goodWeAccount = GoodWeSEMSPlus(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
+        else:
+            self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
         self.runAgain = int(Parameters["Mode2"])
 
         if len(Parameters["Mode1"]) == 0:
@@ -412,6 +413,19 @@ class GoodWeSEMSPlugin:
 
     def onHeartbeat(self):
         if self.enabled:
+            if Parameters["Mode4"] == "Yes":
+                if len(Parameters["Mode1"]) == 0:
+                    Domoticz.Error("No Power Station ID provided, exiting")
+                    logging.error("No Power Station ID provided, exiting")
+                    return
+
+                self.runAgain = self.runAgain - 1
+                if self.runAgain <= 0:
+                    logging.debug("onHeartbeat called, starting SEMS+ device update.")
+                    self.startDeviceUpdateV2()
+                    self.runAgain = int(Parameters["Mode2"])
+                return
+
             if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
                 logging.debug("onHeartbeat called, Connection is alive.")
             elif len(Parameters["Mode1"]) == 0:
@@ -421,13 +435,9 @@ class GoodWeSEMSPlugin:
             else:
                 self.runAgain = self.runAgain - 1
                 if self.runAgain <= 0:
-
                     logging.debug("onHeartbeat called, starting device update.")
                     self.startDeviceUpdateV2()
-
                     self.runAgain = int(Parameters["Mode2"])
-                # else:
-                    # logging.debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
 
     def checkVersion(self, version):
         """checks actual version against stored version as 'Ma.Mi.Pa' and checks if updates needed"""
