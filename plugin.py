@@ -413,11 +413,19 @@ class GoodWeSEMSPlugin:
 
     def onHeartbeat(self):
         if self.enabled:
-            # Skip polling when SEMS+ API is selected but not yet implemented
-            # if Parameters["Mode4"] == "Yes":
-                # logging.debug("SEMS+ API selected but not yet implemented, skipping heartbeat polling")
-                # return
-                
+            if Parameters["Mode4"] == "Yes":
+                if len(Parameters["Mode1"]) == 0:
+                    Domoticz.Error("No Power Station ID provided, exiting")
+                    logging.error("No Power Station ID provided, exiting")
+                    return
+
+                self.runAgain = self.runAgain - 1
+                if self.runAgain <= 0:
+                    logging.debug("onHeartbeat called, starting SEMS+ device update.")
+                    self.startDeviceUpdateV2()
+                    self.runAgain = int(Parameters["Mode2"])
+                return
+
             if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
                 logging.debug("onHeartbeat called, Connection is alive.")
             elif len(Parameters["Mode1"]) == 0:
@@ -427,13 +435,9 @@ class GoodWeSEMSPlugin:
             else:
                 self.runAgain = self.runAgain - 1
                 if self.runAgain <= 0:
-
                     logging.debug("onHeartbeat called, starting device update.")
                     self.startDeviceUpdateV2()
-
                     self.runAgain = int(Parameters["Mode2"])
-                # else:
-                    # logging.debug("onHeartbeat called, run again in " + str(self.runAgain) + " heartbeats.")
 
     def checkVersion(self, version):
         """checks actual version against stored version as 'Ma.Mi.Pa' and checks if updates needed"""
