@@ -97,3 +97,7 @@ Current limitations
 Error: Zonnepanelen: (Zonnepanelen) RequestException: HTTPSConnectionPool(host='eu.semsportal.com', port=443): Read timed out. (read timeout=10)
 Error: Zonnepanelen: (Zonnepanelen) Failed to request data: Failed to call GoodWe API (too many retries)
 ```
+3. The SEMS+ API has a very short lifetime for the authorisation token, so on each poll you can see a logline like below in the logfile. This is no problem it will automatically refresh:
+```
+2026-05-14 12:15:16,321 - INFO     - GoodWe.py          - Failed to call GoodWe API (no valid token), will be refreshed
+```
