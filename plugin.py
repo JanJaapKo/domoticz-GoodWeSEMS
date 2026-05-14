@@ -17,7 +17,7 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.1.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.2.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS api to retrieve the status information of your GoodWe inverter.</p>
@@ -69,8 +69,8 @@
         </param>
         <param field="Mode4" label="use SEMS + API" width="75px">
             <options>
-                <option label="No" value="No" default="true"/>
-                <option label="Yes" value="Yes"/>
+                <option label="No" value="No" />
+                <option label="Yes" value="Yes" default="true"/>
             </options>
         </param>
         <param field="Mode6" label="Log level" width="75px">
