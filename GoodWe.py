@@ -32,6 +32,24 @@ import logging
 import hashlib
 import base64
 
+OLD_LOGIN_URL = "https://www.semsportal.com/api/v3/Common/CrossLogin"
+NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
+_PowerStationURLPart = "/v3/PowerStation/GetMonitorDetailByPowerstationId"
+_PowerControlURLPart = "/PowerStation/SaveRemoteControlInverter"
+_RequestTimeout = 30
+_SuccessCodes = {0, "0", "00000"}
+_NewLoginHeaders = {
+    "Content-Type": "application/json",
+    "Accept": "application/json, */*;q=0.5",
+}
+_DefaultHeaders = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "token": '{"version":"3.1.1","client":"ios","language":"en"}',
+}
+_NewLoginFallbackApi = "https://eu-gateway.semsportal.com/web/sems"
+_LegacyApiFallback = "https://eu.semsportal.com/api"
+
 try:
     import DomoticzEx as Domoticz
     debug = False
@@ -335,55 +353,150 @@ class GoodWeSEMSPlus(GoodWe):
     A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
     """
 
-    def tokenRequest(self):
-        logging.debug("build SEMS+ tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password + "'")
-        url = "https://eu-semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
-        headers = {"Content-Type": "application/json", "User-Agent": "GoodWe SEMS API"}
-        # MD5 hash the password hex and then Base64 encode the hex string
-        md5_hex = hashlib.md5(self.Password.encode("utf-8")).hexdigest()
-        pwd_encoded = base64.b64encode(md5_hex.encode("utf-8")).decode("utf-8")
-        data = json.dumps({"account": self.Username, "pwd": pwd_encoded})
+    def _hash_password_for_new_login(self, password):
+        md5_hex = hashlib.md5(password.encode("utf-8")).hexdigest()
+        return base64.b64encode(md5_hex.encode("utf-8")).decode("utf-8")
 
+    def _extract_login_token(self, apiResponse, fallback_api_url=None):
+        if not isinstance(apiResponse, dict):
+            logging.error("SEMS login response invalid: %s", apiResponse)
+            Domoticz.Error("SEMS login response invalid")
+            return None
+        code = apiResponse.get("code")
+        if code not in _SuccessCodes:
+            err_msg = apiResponse.get("msg", apiResponse.get("description", "Unknown error"))
+            logging.error(
+                "SEMS login failed with code: %s, msg: %s, description: %s",
+                code,
+                apiResponse.get("msg"),
+                apiResponse.get("description"),
+            )
+            Domoticz.Error(f"SEMS login failed with code: {code}, msg: {err_msg}")
+            return None
+        token_data = apiResponse.get("data")
+        if not isinstance(token_data, dict) or not token_data:
+            logging.error("SEMS login response missing or invalid token data: %s", apiResponse)
+            Domoticz.Error("SEMS login response missing or invalid token data")
+            return None
+
+        api_url = apiResponse.get("api") if isinstance(apiResponse.get("api"), str) else token_data.get("api")
+        if not api_url:
+            api_url = fallback_api_url
+        if not api_url:
+            logging.error("SEMS login response missing api url: %s", apiResponse)
+            Domoticz.Error("SEMS login response missing api url")
+            return None
+
+        token_dict = dict(token_data)
+        token_dict["api"] = api_url
+        if not token_dict.get("token"):
+            logging.error("SEMS login response missing token field: %s", apiResponse)
+            Domoticz.Error("SEMS login response missing token field")
+            return None
+        return token_dict
+
+    def _get_new_login_token(self):
+        login_data = {
+            "account": self.Username,
+            "pwd": self._hash_password_for_new_login(self.Password),
+            "agreement": 1,
+            "isChinese": False,
+            "isLocal": False,
+        }
         try:
-            r = requests.post(url, headers=headers, data=data, timeout=30)
+            r = requests.post(NEW_LOGIN_URL, headers=_NewLoginHeaders, json=login_data, timeout=_RequestTimeout)
         except requests.exceptions.RequestException as exp:
-            logging.error("SEMS+ TokenRequestException: " + str(exp))
-            Domoticz.Error("SEMS+ TokenRequestException: " + str(exp))
-            self.tokenAvailable = False
-            return
+            logging.error("SEMS+ new login request failed: %s", exp)
+            Domoticz.Error("SEMS+ new login request failed: " + str(exp))
+            return None
 
-        logging.debug("building SEMS+ token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
         try:
             apiResponse = r.json()
         except json.decoder.JSONDecodeError as exp:
-            logging.error("SEMS+ TokenRequest JSONDecodeError: " + str(exp))
-            Domoticz.Error("SEMS+ TokenRequest JSONDecodeError: " + str(exp))
+            logging.error("SEMS+ new login JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS+ new login JSONDecodeError: " + str(exp))
+            return None
+
+        return self._extract_login_token(apiResponse, _NewLoginFallbackApi)
+
+    def _get_legacy_login_token(self):
+        login_data = json.dumps({"account": self.Username, "pwd": self.Password})
+        try:
+            r = requests.post(OLD_LOGIN_URL, headers=_DefaultHeaders, data=login_data, timeout=_RequestTimeout)
+        except requests.exceptions.RequestException as exp:
+            logging.error("SEMS legacy login request failed: %s", exp)
+            Domoticz.Error("SEMS legacy login request failed: " + str(exp))
+            return None
+
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS legacy login JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS legacy login JSONDecodeError: " + str(exp))
+            return None
+
+        return self._extract_login_token(apiResponse, _LegacyApiFallback)
+
+    def apiRequestHeadersV2(self):
+        logging.debug("build SEMS+ apiRequestHeaders with token: '%s'", json.dumps(self.token))
+        return {
+            'User-Agent': 'Domoticz/1.0',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'token': json.dumps(self.token)
+        }
+
+    def tokenRequest(self):
+        logging.debug("build SEMS+ tokenRequest with username: '%s'", self.Username)
+        token_data = self._get_new_login_token()
+        if token_data is None:
+            logging.info("SEMS+ new login failed, trying legacy SEMS login")
+            token_data = self._get_legacy_login_token()
+
+        if token_data is None:
             self.tokenAvailable = False
             return
 
-        logging.debug("SEMS+ token response: " + json.dumps(apiResponse))
+        self.token = token_data
+        self.tokenAvailable = True
+        self.base_url = self.token.get("api")
+        logging.debug("SEMS+ API Token received: %s", json.dumps(self.token))
+        return 200
 
-        if apiResponse.get("code") == "00000":
-            self.token = apiResponse.get("data", {})
-            logging.debug("SEMS+ API Token received: " + json.dumps(self.token))
-            self.tokenAvailable = True
-            # Extract base_url from response
-            self.base_url = self.token.get("api", "https://eu-gateway.semsportal.com/web/sems") + "/v3"
-        else:
-            error_code = apiResponse.get("code")
-            error_description = apiResponse.get("description", apiResponse.get("msg", "Unknown error"))
-            
-            if error_code == "U0153":
-                logging.error("SEMS+ Token request failed - Account temporarily locked: " + error_description)
-                Domoticz.Error("SEMS+ Token request failed - Account temporarily locked: " + error_description)
-            elif error_code == "100005":
-                logging.error("SEMS+ Token request failed - Incorrect password: " + error_description)
-                Domoticz.Error("SEMS+ Token request failed - Incorrect password: " + error_description)
-            else:
-                logging.error("SEMS+ Token request failed: " + error_description)
-                Domoticz.Error("SEMS+ Token request failed: " + error_description)
-            
-            self.tokenAvailable = False
+    def stationDataRequest(self, stationId):
+        url = _PowerStationURLPart
+        payload = {
+            'powerStationId': stationId
+        }
 
-        return r.status_code
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
+        logging.debug("building SEMS+ station data request on URL: %s which returned status code: %s and response length = %s", r.url, r.status_code, len(r.text))
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS+ station data request JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS+ station data request JSONDecodeError: " + str(exp))
+            return False
+        logging.debug("response station data request : %s", json.dumps(apiResponse))
+        return apiResponse
+
+    def setInverterStatus(self, stationId, inverterSn, mode):
+        url = _PowerControlURLPart
+        payload = {
+            "InverterSN": inverterSn,
+            'powerStationId': stationId,
+            'InverterStatusSettingMark': 1,
+            'InverterStatus': mode
+        }
+
+        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
+        logging.debug("building SEMS+ inverter mode post on URL: %s and payload: '%s' which returned status code: %s and response length = %s", r.url, str(payload), r.status_code, len(r.text))
+        try:
+            apiResponse = r.json()
+        except json.decoder.JSONDecodeError as exp:
+            logging.error("SEMS+ inverter mode post JSONDecodeError: %s", exp)
+            Domoticz.Error("SEMS+ inverter mode post JSONDecodeError: " + str(exp))
+            return False
+        logging.debug("response inverter mode post : %s", json.dumps(apiResponse))
+        return apiResponse
         
