@@ -41,6 +41,8 @@ _SuccessCodes = {0, "0", "00000"}
 _NewLoginHeaders = {
     "Content-Type": "application/json",
     "Accept": "application/json, */*;q=0.5",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "token": '{"uid":"","timestamp":0,"token":"","client":"semsPlusWeb","version":"","language":"en"}',
 }
 _DefaultHeaders = {
     "Content-Type": "application/json",
@@ -451,6 +453,8 @@ class GoodWeSEMSPlus(GoodWe):
             "isChinese": False,
             "isLocal": False,
         }
+        logging.debug("SEMS+ login data "+str(login_data))
+        logging.debug("SEMS+ header data "+str(_NewLoginHeaders))
         try:
             r = requests.post(NEW_LOGIN_URL, headers=_NewLoginHeaders, json=login_data, timeout=_RequestTimeout)
         except requests.exceptions.RequestException as exp:
@@ -488,7 +492,7 @@ class GoodWeSEMSPlus(GoodWe):
     def apiRequestHeadersV2(self):
         logging.debug("build SEMS+ apiRequestHeaders with token: '%s'", json.dumps(self.token))
         return {
-            'User-Agent': 'Domoticz/1.0',
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
             'Content-Type': 'application/json',
             'Accept': 'application/json',
             'token': json.dumps(self.token)
