@@ -540,7 +540,213 @@ class GoodWeSEMSPlus(GoodWe):
             Domoticz.Error("SEMS+ station data request JSONDecodeError: " + str(exp))
             return False
         logging.debug("response station data request : %s", json.dumps(apiResponse))
+
+        # If the legacy monitor endpoint returns no usable inverter data,
+        # fall back to SEMS+ Web endpoints and synthesize a compatible structure.
+        try:
+            data = apiResponse.get("data") if isinstance(apiResponse, dict) else None
+            if not data or not isinstance(data.get("inverter"), list) or len(data.get("inverter")) == 0:
+                logging.info("Legacy SEMS monitor endpoint returned no inverter data; using SEMS+ Web fallback")
+                web_data = self.getWebData(stationId)
+                return web_data
+        except Exception:
+            logging.debug("No usable legacy data, attempting SEMS+ Web fallback")
+            web_data = self.getWebData(stationId)
+            return web_data
+
         return apiResponse
+
+    def _generate_signature(self, token_data):
+        # Generate X-Signature header used by SEMS+ Web endpoints
+        try:
+            epoch_ms = round(time.time() * 1000)
+            digest = hashlib.sha256(f"{epoch_ms}@{token_data.get('uid','')}@{token_data.get('token','')}".encode()).hexdigest()
+            sig = f"{digest}@{epoch_ms}"
+            return base64.b64encode(sig.encode()).decode()
+        except Exception as exp:
+            logging.error("Failed to generate X-Signature: %s", exp)
+            return None
+
+    def _flatten_web_factors(self, response):
+        factors = {}
+        for group in response or []:
+            if not isinstance(group, dict):
+                continue
+            for factor in group.get("factors", []):
+                if not isinstance(factor, dict) or factor.get("data") is None:
+                    continue
+                code = factor.get("code")
+                if isinstance(code, str):
+                    factors[code] = factor.get("data")
+        return factors
+
+    def getWebInverterDevices(self, powerStationId):
+        url_part = f"/sems-plant/api/stations/device/all-status?stationId={powerStationId}"
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+        headers = self.apiRequestHeadersV2()
+        # add X-Signature for web token
+        if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
+            sig = self._generate_signature(self.token)
+            if sig:
+                headers["X-Signature"] = sig
+        try:
+            r = requests.get(api_base + url_part, headers=headers, timeout=10)
+            r.raise_for_status()
+            json_response = r.json()
+        except Exception as exp:
+            logging.error("getWebInverterDevices request failed: %s", exp)
+            Domoticz.Error("getWebInverterDevices request failed: " + str(exp))
+            return []
+
+        result = json_response.get("data") if isinstance(json_response, dict) else None
+        devices = []
+        for device_group in (result.get("deviceDetailList", []) if isinstance(result, dict) else []):
+            if not isinstance(device_group, dict):
+                continue
+            device_type = device_group.get("deviceType")
+            # accept inverter and energy storage integrated cabinet
+            if device_type not in ("INVERTER", "ENERGY_STORAGE_INTEGRATED_CABINET", "SMART_METER"):
+                continue
+            for status_group in device_group.get("statusDetailList", []):
+                if not isinstance(status_group, dict):
+                    continue
+                detail_map = status_group.get("detailMap", {})
+                if not isinstance(detail_map, dict):
+                    continue
+                for serial_number in status_group.get("snList", []):
+                    if not isinstance(serial_number, str):
+                        continue
+                    detail = detail_map.get(serial_number, {})
+                    if isinstance(detail, dict):
+                        device = dict(detail)
+                        device["deviceType"] = device_type
+                        device["status"] = status_group.get("status")
+                        devices.append(device)
+        return devices
+
+    def getWebInverterTelemetry(self, powerStationId, serialNumber, device_type="INVERTER"):
+        url_part = f"/sems-plant/api/equipments/{serialNumber}/telemetry?deviceType={device_type}&pwId={powerStationId}"
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+        headers = self.apiRequestHeadersV2()
+        if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
+            sig = self._generate_signature(self.token)
+            if sig:
+                headers["X-Signature"] = sig
+        try:
+            r = requests.get(api_base + url_part, headers=headers, timeout=10)
+            r.raise_for_status()
+            json_response = r.json()
+        except Exception as exp:
+            logging.error("getWebInverterTelemetry request failed: %s", exp)
+            Domoticz.Error("getWebInverterTelemetry request failed: " + str(exp))
+            return {}
+
+        factors = self._flatten_web_factors(json_response if isinstance(json_response, list) or isinstance(json_response, dict) and json_response.get("data") is None else json_response.get("data", json_response))
+        telemetry = {}
+        # basic mappings used by plugin
+        if isinstance(factors.get("sn"), str):
+            telemetry["sn"] = factors.get("sn")
+        if (v := factors.get("Temperature")) is not None:
+            try:
+                telemetry["tempperature"] = float(v)
+            except Exception:
+                pass
+        # frequency
+        fac = factors.get("Fac") or factors.get("fac")
+        telemetry.setdefault("d", {})
+        if fac is not None:
+            try:
+                telemetry["d"]["fac1"] = float(fac)
+            except Exception:
+                telemetry["d"]["fac1"] = fac
+        # AC values
+        if (v := factors.get("pAc")) is not None:
+            try:
+                telemetry["output_power"] = float(v) * 1000
+            except Exception:
+                pass
+        if (v := factors.get("Vac")) is not None:
+            try:
+                telemetry["output_voltage"] = float(v)
+            except Exception:
+                pass
+        if (v := factors.get("Iac")) is not None:
+            try:
+                telemetry["output_current"] = float(v)
+            except Exception:
+                pass
+        # MPPT inputs
+        for idx in range(1, 5):
+            vp = factors.get(f"MPPT-{idx}:Vpv") or factors.get(f"Vpv{idx}")
+            ip = factors.get(f"MPPT-{idx}:Ipv") or factors.get(f"Ipv{idx}")
+            if vp is not None and ip is not None:
+                try:
+                    vp_f = float(vp)
+                    ip_f = float(ip)
+                    telemetry[f"pv_input_{idx}"] = "{:.1f}V/{:.1f}A".format(vp_f, ip_f)
+                except Exception:
+                    telemetry[f"pv_input_{idx}"] = f"{vp}/{ip}"
+        return telemetry
+
+    def getWebInverterTelecounting(self, powerStationId, serialNumber, device_type="INVERTER"):
+        url_part = f"/sems-plant/api/equipments/{serialNumber}/telecounting?deviceType={device_type}&pwId={powerStationId}"
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+        headers = self.apiRequestHeadersV2()
+        if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
+            sig = self._generate_signature(self.token)
+            if sig:
+                headers["X-Signature"] = sig
+        try:
+            r = requests.get(api_base + url_part, headers=headers, timeout=10)
+            r.raise_for_status()
+            json_response = r.json()
+        except Exception as exp:
+            logging.error("getWebInverterTelecounting request failed: %s", exp)
+            Domoticz.Error("getWebInverterTelecounting request failed: " + str(exp))
+            return {}
+
+        factors = self._flatten_web_factors(json_response if isinstance(json_response, list) or isinstance(json_response, dict) and json_response.get("data") is None else json_response.get("data", json_response))
+        counters = {}
+        mapping = (("proPvStatsToday", "eday"), ("proPvStatsTotal", "etotal"), ("proPvStatsWeek", "eweek"), ("proPvStatsMonth", "thismonthetotle"), ("proPvStatsYear", "eyear"))
+        for src, tgt in mapping:
+            if (v := factors.get(src)) is not None:
+                try:
+                    counters[tgt] = float(v)
+                except Exception:
+                    counters[tgt] = v
+        return counters
+
+    def getWebData(self, powerStationId):
+        # Build the legacy-shaped data object from SEMS+ Web responses
+        inverters = []
+        devices = self.getWebInverterDevices(powerStationId)
+        for device in devices:
+            sn = device.get("sn") or device.get("sn")
+            if not isinstance(sn, str):
+                continue
+            device_type = device.get("deviceType", "INVERTER")
+            telemetry = self.getWebInverterTelemetry(powerStationId, sn, device_type)
+            counters = self.getWebInverterTelecounting(powerStationId, sn, device_type)
+            inverter = {}
+            inverter.update(device)
+            inverter.update(telemetry)
+            inverter.update(counters)
+            # Normalize fields expected by legacy code
+            # plugin expects keys like 'sn','status','fault_message','tempperature','d','output_current','output_voltage','output_power','etotal','pv_input_1'
+            inverter.setdefault('fault_message', '')
+            inverter.setdefault('status', device.get('status', 0))
+            # map pv inputs
+            if 'pv_input_1' in telemetry:
+                inverter['pv_input_1'] = telemetry.get('pv_input_1')
+            if 'pv_input_2' in telemetry:
+                inverter['pv_input_2'] = telemetry.get('pv_input_2')
+            if 'pv_input_3' in telemetry:
+                inverter['pv_input_3'] = telemetry.get('pv_input_3')
+            if 'pv_input_4' in telemetry:
+                inverter['pv_input_4'] = telemetry.get('pv_input_4')
+            # counters may have etotal in kWh; leave as-is
+            inverters.append(inverter)
+        return {'inverter': inverters}
 
     def setInverterStatus(self, stationId, inverterSn, mode):
         url = _PowerControlURLPart
