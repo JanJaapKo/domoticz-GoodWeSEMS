@@ -38,12 +38,17 @@ _PowerStationURLPart = "/v3/PowerStation/GetMonitorDetailByPowerstationId"
 _PowerControlURLPart = "/PowerStation/SaveRemoteControlInverter"
 _RequestTimeout = 30
 _SuccessCodes = {0, "0", "00000"}
+_BrowserUserAgent = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:116.0) "
+    "Gecko/20100101 Firefox/116.0"
+)
+
 _NewLoginHeaders = {
     "Content-Type": "application/json",
     "Accept": "application/json, */*;q=0.5",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
     "token": '{"uid":"","timestamp":0,"token":"","client":"semsPlusWeb","version":"","language":"en"}',
 }
+
 _DefaultHeaders = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -203,9 +208,9 @@ class GoodWe:
         logging.debug("PowerStation created: '" + powerStation.id + "'")
 
     def apiRequestHeadersV2(self):
-        logging.debug("build apiRequestHeaders with token: '" + json.dumps(self.token) + "'" )
+        logging.debug("build apiRequestHeaders with token: '%s'", json.dumps(self.token))
         return {
-            'User-Agent': 'Domoticz/1.0',
+            'User-Agent': _BrowserUserAgent,
             'token': json.dumps(self.token)
         }
 
@@ -456,7 +461,9 @@ class GoodWeSEMSPlus(GoodWe):
         logging.debug("SEMS+ login data "+str(login_data))
         logging.debug("SEMS+ header data "+str(_NewLoginHeaders))
         try:
-            r = requests.post(NEW_LOGIN_URL, headers=_NewLoginHeaders, json=login_data, timeout=_RequestTimeout)
+            # Ensure a browser User-Agent is present while preserving endpoint headers
+            headers = {"User-Agent": _BrowserUserAgent, **_NewLoginHeaders}
+            r = requests.post(NEW_LOGIN_URL, headers=headers, json=login_data, timeout=_RequestTimeout)
         except requests.exceptions.RequestException as exp:
             logging.error("SEMS+ new login request failed: %s", exp)
             Domoticz.Error("SEMS+ new login request failed: " + str(exp))
@@ -474,7 +481,9 @@ class GoodWeSEMSPlus(GoodWe):
     def _get_legacy_login_token(self):
         login_data = json.dumps({"account": self.Username, "pwd": self.Password})
         try:
-            r = requests.post(OLD_LOGIN_URL, headers=_DefaultHeaders, data=login_data, timeout=_RequestTimeout)
+            # Ensure a browser User-Agent is present while preserving legacy headers
+            headers = {"User-Agent": _BrowserUserAgent, **_DefaultHeaders}
+            r = requests.post(OLD_LOGIN_URL, headers=headers, data=login_data, timeout=_RequestTimeout)
         except requests.exceptions.RequestException as exp:
             logging.error("SEMS legacy login request failed: %s", exp)
             Domoticz.Error("SEMS legacy login request failed: " + str(exp))
@@ -492,7 +501,7 @@ class GoodWeSEMSPlus(GoodWe):
     def apiRequestHeadersV2(self):
         logging.debug("build SEMS+ apiRequestHeaders with token: '%s'", json.dumps(self.token))
         return {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+            "User-Agent": _BrowserUserAgent,
             'Content-Type': 'application/json',
             'Accept': 'application/json',
             'token': json.dumps(self.token)
