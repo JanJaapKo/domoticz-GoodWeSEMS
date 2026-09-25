@@ -11,7 +11,6 @@ import sys, os
 
 from GoodWe import GoodWeSEMSPlus
 
-
 # Set these values before running the script.
 SEMS_USERNAME = ""
 SEMS_PASSWORD = ""
