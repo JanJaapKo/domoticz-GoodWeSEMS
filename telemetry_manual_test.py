@@ -66,18 +66,75 @@ def main():
 
     print(f"===== Querying telemetry for station {station_id}... =====")
     try:
-        response = account.stationDataRequest(station_id)
+        sems_response = account.stationDataRequest(station_id)
     except Exception as error:
-        print(f"Telemetry request failed: {error}", file=sys.stderr)
+        sems_response = None
+        logger.exception("SEMS+ telemetry request failed")
+        print(f"SEMS+ telemetry request failed: {error}", file=sys.stderr)
+
+    print("\n===== SEMS+ result =====")
+    print(json.dumps(sems_response, indent=2, sort_keys=True, default=str))
+    sems_data = sems_response.get("data", sems_response) if isinstance(sems_response, dict) else {}
+    sems_inverters = sems_data.get("inverter", []) if isinstance(sems_data, dict) else []
+    print(f"SEMS+ devices returned: {len(sems_inverters)}")
+
+    telemetry_count = 0
+    try:
+        logger.info("OPENAPI START Query Device List Under Station: stationId=%s", station_id)
+        print(f"\n===== OPENAPI START Query Device List Under Station: {station_id} =====")
+        device_list_response = account.openApiDeviceListRequest(station_id)
+        device_list_json = json.dumps(device_list_response, indent=2, sort_keys=True, default=str)
+        logger.info("OPENAPI RESULT Query Device List Under Station:\n%s", device_list_json)
+        print("===== OPENAPI RESULT Query Device List Under Station =====")
+        print(device_list_json)
+
+        response_data = device_list_response.get("data", [])
+        plants = response_data if isinstance(response_data, list) else []
+        devices_by_type = {}
+        for plant in plants:
+            if not isinstance(plant, dict) or plant.get("plantId") != station_id:
+                continue
+            for device in plant.get("deviceData", []):
+                if not isinstance(device, dict):
+                    continue
+                serial_number = device.get("deviceSn")
+                device_type = device.get("deviceType")
+                if isinstance(serial_number, str) and isinstance(device_type, int):
+                    devices_by_type.setdefault(device_type, []).append(serial_number)
+
+        for device_type, serial_numbers in devices_by_type.items():
+            for offset in range(0, len(serial_numbers), 100):
+                batch = serial_numbers[offset:offset + 100]
+                logger.info(
+                    "OPENAPI START Query Device Real-time Telemetry Data: deviceType=%s, sns=%s",
+                    device_type,
+                    batch,
+                )
+                print(f"\n===== OPENAPI START Query Device Real-time Telemetry Data: deviceType={device_type}, sns={batch} =====")
+                telemetry_response = account.openApiDeviceTelemetryRequest(batch, device_type)
+                telemetry_json = json.dumps(telemetry_response, indent=2, sort_keys=True, default=str)
+                logger.info(
+                    "OPENAPI RESULT Query Device Real-time Telemetry Data: deviceType=%s\n%s",
+                    device_type,
+                    telemetry_json,
+                )
+                print(f"===== OPENAPI RESULT Query Device Real-time Telemetry Data: deviceType={device_type} =====")
+                print(telemetry_json)
+                telemetry_data = telemetry_response.get("data", {})
+                if isinstance(telemetry_data, dict):
+                    telemetry_count += len(telemetry_data.get("deviceData", []))
+    except Exception as error:
+        logger.exception("OPENAPI request failed")
+        print(f"OpenAPI request failed: {error}", file=sys.stderr)
         return 1
 
-    print(json.dumps(response, indent=2, sort_keys=True))
-    inverters = response.get("data", {}).get("inverter", []) if isinstance(response, dict) else []
-    if not inverters:
-        print("The endpoint returned no device telemetry for this station.", file=sys.stderr)
+    if not telemetry_count:
+        logger.warning("OPENAPI RESULT: no device telemetry returned for station %s", station_id)
+        print("The OpenAPI telemetry endpoint returned no device data.", file=sys.stderr)
         return 1
 
-    print(f" ===== Received telemetry for {len(inverters)} device(s). ===== ")
+    logger.info("OPENAPI RESULT: telemetry returned for %s device(s)", telemetry_count)
+    print(f"\n===== OPENAPI telemetry returned for {telemetry_count} device(s). =====")
     return 0
 
 
