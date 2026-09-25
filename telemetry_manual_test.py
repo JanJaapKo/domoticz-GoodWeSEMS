@@ -7,7 +7,7 @@ Fill in the configuration values below, then run:
 
 import json
 import logging
-import sys
+import sys, os
 
 from GoodWe import GoodWeSEMSPlus
 
@@ -17,10 +17,23 @@ SEMS_USERNAME = ""
 SEMS_PASSWORD = ""
 STATION_ID = ""
 SEMS_SERVER = "eu.semsportal.com"
-
+logger = None
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logger = logging.getLogger('root')
+    log_filename = "goodwe manual test.log"
+    log_format = '%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s'
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    # Ensure a file handler is always created for this plugin log file.
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, logging.FileHandler) and os.path.abspath(getattr(handler, 'baseFilename', '')) == os.path.abspath(log_filename):
+            root_logger.removeHandler(handler)
+    file_handler = logging.FileHandler(log_filename)
+    file_handler.setFormatter(logging.Formatter(log_format))
+    file_handler.setLevel(root_logger.level)
+    root_logger.addHandler(file_handler)
 
     username = SEMS_USERNAME.strip()
     password = SEMS_PASSWORD
