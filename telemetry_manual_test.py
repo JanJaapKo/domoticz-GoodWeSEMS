@@ -1,42 +1,48 @@
 """Manually verify live telemetry from the GoodWe OpenAPI.
 
-Set GOODWE_OPENAPI_CLIENT_ID, GOODWE_OPENAPI_CLIENT_SECRET,
-GOODWE_OPENAPI_BASE_URL, and GOODWE_STATION_ID before running:
+Fill in the configuration values below, then run:
 
     python telemetry_manual_test.py
 """
 
 import json
 import logging
-import os
 import sys
 
 from GoodWe import GoodWeSEMSPlus
 
 
+# Set these values before running the script.
+OPENAPI_CLIENT_ID = ""
+OPENAPI_CLIENT_SECRET = ""
+OPENAPI_BASE_URL = "https://eu-gateway.semsportal.com"
+STATION_ID = ""
+SEMS_SERVER = "eu.semsportal.com"
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-    client_id = os.getenv("GOODWE_OPENAPI_CLIENT_ID", "").strip()
-    client_secret = os.getenv("GOODWE_OPENAPI_CLIENT_SECRET", "")
-    base_url = os.getenv("GOODWE_OPENAPI_BASE_URL", "").strip()
-    station_id = os.getenv("GOODWE_STATION_ID", "").strip()
+    client_id = OPENAPI_CLIENT_ID.strip()
+    client_secret = OPENAPI_CLIENT_SECRET
+    base_url = OPENAPI_BASE_URL.strip()
+    station_id = STATION_ID.strip()
     missing = [
         name
         for name, value in (
-            ("GOODWE_OPENAPI_CLIENT_ID", client_id),
-            ("GOODWE_OPENAPI_CLIENT_SECRET", client_secret),
-            ("GOODWE_OPENAPI_BASE_URL", base_url),
-            ("GOODWE_STATION_ID", station_id),
+            ("OPENAPI_CLIENT_ID", client_id),
+            ("OPENAPI_CLIENT_SECRET", client_secret),
+            ("OPENAPI_BASE_URL", base_url),
+            ("STATION_ID", station_id),
         )
         if not value
     ]
     if missing:
-        print("Missing required environment variable(s): " + ", ".join(missing), file=sys.stderr)
+        print("Set these script variables before running: " + ", ".join(missing), file=sys.stderr)
         return 2
 
     account = GoodWeSEMSPlus(
-        os.getenv("GOODWE_SEMS_SERVER", "eu.semsportal.com"),
+        SEMS_SERVER,
         "443",
         "",
         "",
