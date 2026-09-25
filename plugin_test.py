@@ -195,6 +195,54 @@ class GoodWeSemsAuthenticationTest(unittest.TestCase):
         self.assertEqual(account.token["token"], "sems-token")
 
 
+class GoodWeOpenApiTest(unittest.TestCase):
+    @patch("GoodWe.requests.post")
+    def test_openapi_methods_use_documented_request_contracts(self, post):
+        device_response = Mock()
+        device_response.status_code = 200
+        device_response.json.return_value = {"code": "00000", "msg": "ok", "data": []}
+        telemetry_response = Mock()
+        telemetry_response.status_code = 200
+        telemetry_response.json.return_value = {
+            "code": "00000",
+            "msg": "ok",
+            "data": {"deviceData": [{"sn": "serial-1", "parameters": {"pvPower": "4500"}}]},
+        }
+        post.side_effect = [device_response, telemetry_response]
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.token = {
+            "uid": "user-id",
+            "timestamp": 123,
+            "token": "sems-session-token",
+            "client": "semsPlusWeb",
+            "api": "https://eu-gateway.semsportal.com/web/sems",
+        }
+        account.base_url = account.token["api"]
+
+        device_result = account.openApiDeviceListRequest("station-uuid")
+        telemetry_result = account.openApiDeviceTelemetryRequest(["serial-1"], 0)
+
+        self.assertEqual(account.token["token"], "sems-session-token")
+        self.assertEqual(device_result["code"], "00000")
+        self.assertEqual(telemetry_result["data"]["deviceData"][0]["sn"], "serial-1")
+        self.assertEqual(post.call_args_list[0].args[0], "https://eu-gateway.semsportal.com/goodwe/integration/api/v1/base-info/plant/devices")
+        self.assertEqual(post.call_args_list[0].kwargs["json"], {"searchType": 1, "searchKey": ["station-uuid"]})
+        self.assertEqual(post.call_args_list[1].args[0], "https://eu-gateway.semsportal.com/goodwe/integration/api/v1/realtime/devices")
+        self.assertEqual(post.call_args_list[1].kwargs["json"], {"sns": ["serial-1"], "deviceType": 0})
+        request_headers = post.call_args_list[1].kwargs["headers"]
+        self.assertEqual(request_headers["Authorization"], "Bearer sems-session-token")
+        self.assertEqual(json.loads(request_headers["token"])["token"], "sems-session-token")
+        self.assertTrue(request_headers["Request-Id"])
+
+    def test_openapi_telemetry_rejects_more_than_100_devices(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.openApiBaseUrl = "https://eu-gateway.semsportal.com"
+        account.openApiToken = "openapi-token"
+
+        with self.assertRaises(ValueError):
+            account.openApiDeviceTelemetryRequest(["sn"] * 101, 0)
+
+
 def main():
     logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(filename)-18s - %(message)s', filename="goodwe_test.log",level=logging.DEBUG)
     logging.info("==== starting test run ====")

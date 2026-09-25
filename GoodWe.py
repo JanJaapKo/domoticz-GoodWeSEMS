@@ -31,6 +31,8 @@ import exceptions
 import logging
 import hashlib
 import base64
+import uuid
+from urllib.parse import urlsplit
 
 OLD_LOGIN_URL = "https://www.semsportal.com/api/v3/Common/CrossLogin"
 NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
@@ -359,6 +361,55 @@ class GoodWeSEMSPlus(GoodWe):
     """
     A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
     """
+
+    def _openApiPost(self, path, payload):
+        if not isinstance(self.token, dict) or not self.token.get("token"):
+            raise exceptions.GoodweException("Request a SEMS+ token before querying OpenAPI endpoints")
+
+        api_url = self.token.get("api") or self.base_url
+        parsed_api_url = urlsplit(api_url)
+        if not parsed_api_url.scheme or not parsed_api_url.netloc:
+            raise exceptions.GoodweException("SEMS+ token response does not contain a valid API URL")
+        api_base = f"{parsed_api_url.scheme}://{parsed_api_url.netloc}"
+        token_header = json.dumps(self.token)
+
+        response = requests.post(
+            api_base + path,
+            headers={
+                "Authorization": "Bearer " + self.token["token"],
+                "token": token_header,
+                "Request-Id": str(uuid.uuid4()),
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            json=payload,
+            timeout=_RequestTimeout,
+        )
+        response.raise_for_status()
+        api_response = response.json()
+        if not isinstance(api_response, dict) or api_response.get("code") != "00000":
+            message = api_response.get("msg", api_response) if isinstance(api_response, dict) else api_response
+            raise exceptions.GoodweException("GoodWe OpenAPI request failed: " + str(message))
+        return api_response
+
+    def openApiDeviceListRequest(self, stationId):
+        """Query the OpenAPI device list for a station UUID."""
+        return self._openApiPost(
+            "/goodwe/integration/api/v1/base-info/plant/devices",
+            {"searchType": 1, "searchKey": [stationId]},
+        )
+
+    def openApiDeviceTelemetryRequest(self, serialNumbers, deviceType):
+        """Query real-time telemetry for up to 100 devices of one type."""
+        if isinstance(serialNumbers, str):
+            serialNumbers = [serialNumbers]
+        if not serialNumbers or len(serialNumbers) > 100:
+            raise ValueError("serialNumbers must contain between 1 and 100 device serial numbers")
+
+        return self._openApiPost(
+            "/goodwe/integration/api/v1/realtime/devices",
+            {"sns": list(serialNumbers), "deviceType": deviceType},
+        )
 
     def _is_powerstation_route(self, url_part):
         """Return whether the route should use the legacy PowerStation host."""
