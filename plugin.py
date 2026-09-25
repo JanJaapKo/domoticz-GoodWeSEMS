@@ -21,7 +21,6 @@
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
-        <p>For the GoodWe OpenAPI telemetry endpoints, configure an approved developer Client ID, Client Secret, and assigned gateway host.</p>
         <p>This version will repalce the old one per MAy 2026</p>
         <p>Version: 5.0.0</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
@@ -74,17 +73,12 @@
                 <option label="Yes" value="Yes" default="true"/>
             </options>
         </param>
-        <param field="Mode5" label="OpenAPI Client ID" width="300px"/>
         <param field="Mode6" label="Log level" width="75px">
             <options>
                 <option label="Verbose" value="Verbose"/>
                 <option label="Debug" value="Debug"/>
                 <option label="Normal" value="Normal" default="true"/>
             </options>
-        </param>
-        <param field="Mode7" label="OpenAPI Client Secret" width="300px" password="true"/>
-        <param field="Mode8" label="OpenAPI Gateway Host" width="300px">
-            <description>Use the gateway assigned by GoodWe, for example eu-gateway.semsportal.com.</description>
         </param>
     </params>
 </plugin>
@@ -377,15 +371,7 @@ class GoodWeSEMSPlugin:
             return False
 
         if Parameters["Mode4"] == "Yes":
-            self.goodWeAccount = GoodWeSEMSPlus(
-                Parameters["Address"],
-                Parameters["Port"],
-                Parameters["Username"],
-                Parameters["Password"],
-                Parameters.get("Mode5", ""),
-                Parameters.get("Mode7", ""),
-                Parameters.get("Mode8", ""),
-            )
+            self.goodWeAccount = GoodWeSEMSPlus(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
         else:
             self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
         self.runAgain = int(Parameters["Mode2"])

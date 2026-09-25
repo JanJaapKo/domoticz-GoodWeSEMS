@@ -1,4 +1,4 @@
-"""Manually verify live telemetry from the GoodWe OpenAPI.
+"""Manually verify live telemetry through the GoodWe SEMS+ web API.
 
 Fill in the configuration values below, then run:
 
@@ -13,9 +13,8 @@ from GoodWe import GoodWeSEMSPlus
 
 
 # Set these values before running the script.
-OPENAPI_CLIENT_ID = ""
-OPENAPI_CLIENT_SECRET = ""
-OPENAPI_BASE_URL = "https://eu-gateway.semsportal.com"
+SEMS_USERNAME = ""
+SEMS_PASSWORD = ""
 STATION_ID = ""
 SEMS_SERVER = "eu.semsportal.com"
 
@@ -23,16 +22,14 @@ SEMS_SERVER = "eu.semsportal.com"
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-    client_id = OPENAPI_CLIENT_ID.strip()
-    client_secret = OPENAPI_CLIENT_SECRET
-    base_url = OPENAPI_BASE_URL.strip()
+    username = SEMS_USERNAME.strip()
+    password = SEMS_PASSWORD
     station_id = STATION_ID.strip()
     missing = [
         name
         for name, value in (
-            ("OPENAPI_CLIENT_ID", client_id),
-            ("OPENAPI_CLIENT_SECRET", client_secret),
-            ("OPENAPI_BASE_URL", base_url),
+            ("SEMS_USERNAME", username),
+            ("SEMS_PASSWORD", password),
             ("STATION_ID", station_id),
         )
         if not value
@@ -44,17 +41,14 @@ def main():
     account = GoodWeSEMSPlus(
         SEMS_SERVER,
         "443",
-        "",
-        "",
-        client_id,
-        client_secret,
-        base_url,
+        username,
+        password,
     )
 
-    print("Requesting GoodWe OpenAPI access token...")
+    print("Requesting SEMS+ access token...")
     account.tokenRequest()
     if not account.tokenAvailable:
-        print("Token request failed; check the gateway and developer credentials.", file=sys.stderr)
+        print("Token request failed; check the SEMS+ server and account credentials.", file=sys.stderr)
         return 1
 
     print(f"Querying telemetry for station {station_id}...")

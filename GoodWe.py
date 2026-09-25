@@ -31,7 +31,6 @@ import exceptions
 import logging
 import hashlib
 import base64
-import uuid
 
 OLD_LOGIN_URL = "https://www.semsportal.com/api/v3/Common/CrossLogin"
 NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
@@ -361,111 +360,6 @@ class GoodWeSEMSPlus(GoodWe):
     A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
     """
 
-    def __init__(self, Address, Port, User, Password, openApiClientId="", openApiClientSecret="", openApiBaseUrl=""):
-        super().__init__(Address, Port, User, Password)
-        self.openApiClientId = openApiClientId.strip()
-        self.openApiClientSecret = openApiClientSecret
-        self.openApiBaseUrl = openApiBaseUrl.strip().rstrip("/")
-        if self.openApiBaseUrl and not self.openApiBaseUrl.startswith(("http://", "https://")):
-            self.openApiBaseUrl = "https://" + self.openApiBaseUrl
-
-    def _openapi_post(self, path, payload):
-        if not self.openApiBaseUrl:
-            raise exceptions.GoodweException("GoodWe OpenAPI base URL is required")
-
-        headers = {
-            "Authorization": "Bearer " + self.token["access_token"],
-            "Request-Id": str(uuid.uuid4()),
-            "Content-Type": "application/json",
-        }
-        response = requests.post(
-            self.openApiBaseUrl + path,
-            headers=headers,
-            json=payload,
-            timeout=_RequestTimeout,
-        )
-        if response.status_code == 401:
-            self.tokenRequest()
-            headers["Authorization"] = "Bearer " + self.token["access_token"]
-            headers["Request-Id"] = str(uuid.uuid4())
-            response = requests.post(
-                self.openApiBaseUrl + path,
-                headers=headers,
-                json=payload,
-                timeout=_RequestTimeout,
-            )
-        response.raise_for_status()
-        result = response.json()
-        if not isinstance(result, dict) or result.get("code") != "00000":
-            raise exceptions.GoodweException(
-                "GoodWe OpenAPI request failed: " + str(result.get("msg", result) if isinstance(result, dict) else result)
-            )
-        return result.get("data") or {}
-
-    def _openapi_station_data(self, station_id):
-        station_data = self._openapi_post(
-            "/goodwe/integration/api/v1/base-info/plant/devices",
-            {"searchType": 1, "searchKey": [station_id]},
-        )
-        plants = station_data if isinstance(station_data, list) else []
-        devices = []
-        for plant in plants:
-            if not isinstance(plant, dict) or plant.get("plantId") != station_id:
-                continue
-            devices.extend(plant.get("deviceData", []))
-
-        devices_by_type = {}
-        for device in devices:
-            if not isinstance(device, dict) or device.get("deviceType") not in (0, 1):
-                continue
-            serial_number = device.get("deviceSn")
-            if isinstance(serial_number, str) and serial_number:
-                devices_by_type.setdefault(device["deviceType"], []).append(device)
-
-        inverters = []
-        for device_type, typed_devices in devices_by_type.items():
-            for offset in range(0, len(typed_devices), 100):
-                batch = typed_devices[offset:offset + 100]
-                telemetry_data = self._openapi_post(
-                    "/goodwe/integration/api/v1/realtime/devices",
-                    {"sns": [device["deviceSn"] for device in batch], "deviceType": device_type},
-                )
-                for reading in telemetry_data.get("deviceData", []):
-                    if not isinstance(reading, dict):
-                        continue
-                    device = next((item for item in batch if item["deviceSn"] == reading.get("sn")), {})
-                    parameters = reading.get("parameters", {})
-                    if not isinstance(parameters, dict):
-                        continue
-                    inverter = {
-                        "sn": reading.get("sn"),
-                        "name": device.get("deviceName") or "GoodWe device",
-                        "status": parameters.get("deviceStatus", 0),
-                        "fault_message": "",
-                        "deviceType": device_type,
-                        "d": {},
-                    }
-                    field_map = {
-                        "pvPower": "output_power",
-                        "acVoltage1": "output_voltage",
-                        "acCurrent1": "output_current",
-                        "innerTemperature": "tempperature",
-                        "dailyGeneration": "eday",
-                        "totalGeneration": "etotal",
-                    }
-                    for source, target in field_map.items():
-                        if parameters.get(source) is not None:
-                            inverter[target] = parameters[source]
-                    if parameters.get("acFrequency1") is not None:
-                        inverter["d"]["fac1"] = parameters["acFrequency1"]
-                    for index in range(1, 5):
-                        voltage = parameters.get(f"dcVoltage{index}")
-                        current = parameters.get(f"dcCurrent{index}")
-                        if voltage is not None and current is not None:
-                            inverter[f"pv_input_{index}"] = f"{voltage}V/{current}A"
-                    inverters.append(inverter)
-        return {"code": 0, "data": {"inverter": inverters}}
-
     def _is_powerstation_route(self, url_part):
         """Return whether the route should use the legacy PowerStation host."""
         return url_part.startswith("/PowerStation") or url_part.startswith("/v3/PowerStation")
@@ -562,7 +456,7 @@ class GoodWeSEMSPlus(GoodWe):
             "pwd": self._hash_password_for_new_login(self.Password),
             "agreement": 1,
             "isChinese": False,
-            "isLocal": False,
+            "isLocal": True,
         }
         logging.debug("SEMS+ login data "+str(login_data))
         logging.debug("SEMS+ header data "+str(_NewLoginHeaders))
@@ -614,37 +508,6 @@ class GoodWeSEMSPlus(GoodWe):
         }
 
     def tokenRequest(self):
-        if self.openApiClientId and self.openApiClientSecret:
-            if not self.openApiBaseUrl:
-                logging.error("GoodWe OpenAPI base URL is not configured")
-                Domoticz.Error("GoodWe OpenAPI base URL is not configured")
-                self.tokenAvailable = False
-                return
-            token_url = self.openApiBaseUrl + "/goodwe/goodwe-authorization-server/oauth2/token"
-            try:
-                response = requests.post(
-                    token_url,
-                    auth=(self.openApiClientId, self.openApiClientSecret),
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    data={"grant_type": "client_credentials"},
-                    timeout=_RequestTimeout,
-                )
-                response.raise_for_status()
-                token_response = response.json()
-            except (requests.exceptions.RequestException, json.decoder.JSONDecodeError) as exp:
-                logging.error("GoodWe OpenAPI token request failed: %s", exp)
-                Domoticz.Error("GoodWe OpenAPI token request failed: " + str(exp))
-                self.tokenAvailable = False
-                return
-            if not isinstance(token_response, dict) or not token_response.get("access_token"):
-                logging.error("GoodWe OpenAPI token response invalid: %s", token_response)
-                Domoticz.Error("GoodWe OpenAPI token response invalid")
-                self.tokenAvailable = False
-                return
-            self.token = token_response
-            self.tokenAvailable = True
-            return response.status_code
-
         logging.debug("build SEMS+ tokenRequest with username: '%s'", self.Username)
         token_data = self._get_new_login_token()
         if token_data is None:
@@ -662,9 +525,6 @@ class GoodWeSEMSPlus(GoodWe):
         return 200
 
     def stationDataRequest(self, stationId):
-        if self.openApiClientId and self.openApiClientSecret:
-            return self._openapi_station_data(stationId)
-
         url = _PowerStationURLPart
         payload = {
             'powerStationId': stationId
