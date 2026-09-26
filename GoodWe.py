@@ -295,6 +295,9 @@ class GoodWe:
                 responseData = self.stationDataRequest(stationId)
                 if not responseData:
                     return
+                if isinstance(responseData, dict) and isinstance(responseData.get("inverter"), list):
+                    logging.debug("Received normalized SEMS+ telemetry data")
+                    return responseData
                 try:
                     code = int(responseData['code'])
                 except (ValueError, KeyError):
@@ -786,6 +789,11 @@ class GoodWeSEMSPlus(GoodWe):
             # plugin expects keys like 'sn','status','fault_message','tempperature','d','output_current','output_voltage','output_power','etotal','pv_input_1'
             inverter.setdefault('fault_message', '')
             inverter.setdefault('status', device.get('status', 0))
+            if inverter['status'] not in self.INVERTER_STATE:
+                try:
+                    inverter['status'] = 1 if float(inverter.get('output_power', 0)) > 0 else 0
+                except (TypeError, ValueError):
+                    inverter['status'] = 0
             # map pv inputs
             if 'pv_input_1' in telemetry:
                 inverter['pv_input_1'] = telemetry.get('pv_input_1')

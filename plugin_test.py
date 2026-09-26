@@ -195,6 +195,41 @@ class GoodWeSemsAuthenticationTest(unittest.TestCase):
         self.assertEqual(account.token["token"], "sems-token")
 
 
+class GoodWeFallbackMappingTest(unittest.TestCase):
+    def test_station_data_request_v2_accepts_normalized_fallback(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        expected = {"inverter": [{"sn": "54200DSN196R0358"}]}
+        account.stationDataRequest = lambda station_id: expected
+
+        self.assertEqual(account.stationDataRequestV2("station-uuid"), expected)
+
+    def test_unknown_sems_status_maps_from_live_output(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.getWebInverterDevices = lambda station_id: [{
+            "sn": "54200DSN196R0358",
+            "name": "GW4200D-NS",
+            "deviceType": "INVERTER",
+            "status": 5,
+        }]
+        account.getWebInverterTelemetry = lambda station_id, serial_number, device_type: {
+            "output_power": 1497.0,
+            "output_current": 6.8,
+            "output_voltage": 237.5,
+            "tempperature": 34.6,
+            "d": {"fac1": 49.98},
+            "pv_input_1": "242.8V/3.2A",
+        }
+        account.getWebInverterTelecounting = lambda station_id, serial_number, device_type: {
+            "eday": 3.1,
+            "etotal": 25415.0,
+        }
+
+        result = account.getWebData("station-uuid")
+
+        self.assertEqual(result["inverter"][0]["status"], 1)
+        self.assertEqual(account.INVERTER_STATE[result["inverter"][0]["status"]], "generating")
+
+
 class GoodWeOpenApiTest(unittest.TestCase):
     @patch("GoodWe.requests.post")
     def test_openapi_methods_use_documented_request_contracts(self, post):
