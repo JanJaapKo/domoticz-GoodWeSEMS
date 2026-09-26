@@ -794,6 +794,15 @@ class GoodWeSEMSPlus(GoodWe):
                     inverter['status'] = 1 if float(inverter.get('output_power', 0)) > 0 else 0
                 except (TypeError, ValueError):
                     inverter['status'] = 0
+            for field in ('tempperature', 'output_current', 'output_voltage', 'output_power', 'etotal'):
+                if inverter.get(field) is None:
+                    inverter[field] = 0
+            if not isinstance(inverter.get('d'), dict):
+                inverter['d'] = {}
+            inverter['d'].setdefault('fac1', 0)
+            inverter.setdefault('pv_input_1', '0V/0A')
+            for field in ('battery', 'bms_status', 'battery_power'):
+                inverter.setdefault(field, '')
             # map pv inputs
             if 'pv_input_1' in telemetry:
                 inverter['pv_input_1'] = telemetry.get('pv_input_1')
@@ -805,7 +814,14 @@ class GoodWeSEMSPlus(GoodWe):
                 inverter['pv_input_4'] = telemetry.get('pv_input_4')
             # counters may have etotal in kWh; leave as-is
             inverters.append(inverter)
-        return {'inverter': inverters}
+        return {
+            'info': {
+                'powerstation_id': powerStationId,
+                'stationname': '',
+                'address': '',
+            },
+            'inverter': inverters,
+        }
 
     def setInverterStatus(self, stationId, inverterSn, mode):
         url = _PowerControlURLPart

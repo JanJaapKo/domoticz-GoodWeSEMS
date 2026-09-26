@@ -229,6 +229,31 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         self.assertEqual(result["inverter"][0]["status"], 1)
         self.assertEqual(account.INVERTER_STATE[result["inverter"][0]["status"]], "generating")
 
+    def test_empty_telemetry_and_counters_return_plugin_safe_station_data(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.getWebInverterDevices = lambda station_id: [{
+            "sn": "54200DSN196R0358",
+            "name": "GW4200D-NS",
+            "deviceType": "INVERTER",
+            "status": 5,
+        }]
+        account.getWebInverterTelemetry = lambda station_id, serial_number, device_type: {}
+        account.getWebInverterTelecounting = lambda station_id, serial_number, device_type: {}
+
+        result = account.getWebData("station-uuid")
+        station = PowerStation(stationData=result)
+        inverter = result["inverter"][0]
+
+        self.assertEqual(result["info"]["powerstation_id"], "station-uuid")
+        self.assertEqual(station.id, "station-uuid")
+        self.assertEqual(inverter["status"], 0)
+        self.assertEqual(inverter["output_current"], 0)
+        self.assertEqual(inverter["output_voltage"], 0)
+        self.assertEqual(inverter["output_power"], 0)
+        self.assertEqual(inverter["etotal"], 0)
+        self.assertEqual(inverter["pv_input_1"], "0V/0A")
+        self.assertIn("fac1", inverter["d"])
+
 
 class GoodWeOpenApiTest(unittest.TestCase):
     @patch("GoodWe.requests.post")
