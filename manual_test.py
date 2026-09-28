@@ -186,6 +186,43 @@ def test_calculate_new_energy(plugin_module):
     print("test_calculate_new_energy passed")
 
 
+def test_update_devices_skips_zero_counter_reset(plugin_module):
+    print("\nRunning test_update_devices_skips_zero_counter_reset()")
+    serial_number = "sn_counter"
+    plugin_module.Devices = {serial_number: FakeDevice(serial_number)}
+    output_unit = FakeUnit("Output Power", serial_number, plugin_module._plugin.outputPowerUnit)
+    output_unit.sValue = "588.0;9066300.0"
+    plugin_module.Devices[serial_number].Units[output_unit.Unit] = output_unit
+
+    inverter_data = {
+        "sn": serial_number,
+        "fault_message": "",
+        "status": 0,
+        "output_current": 0,
+        "output_voltage": 0,
+        "output_power": 0,
+        "etotal": 0,
+        "pv_input_1": "0V/0A",
+        "battery": 0,
+        "bms_status": 0,
+        "battery_power": 0,
+    }
+    station = types.SimpleNamespace(inverters={serial_number: plugin_module._plugin})
+    plugin_module._plugin.goodWeAccount = types.SimpleNamespace(
+        powerStationList={1: station}, INVERTER_STATE={0: "offline"}
+    )
+
+    plugin_module._plugin.updateDevices({"inverter": [inverter_data]})
+    assert output_unit.sValue == "588.0;9066300.0", "A zero total must not reset an existing counter"
+    assert output_unit.update_called == 0, "A suspicious zero counter update must be skipped"
+
+    inverter_data["etotal"] = 9066.4
+    plugin_module._plugin.updateDevices({"inverter": [inverter_data]})
+    assert output_unit.sValue == "0;9066400.0", "Zero live power with a valid total must still update"
+    assert output_unit.update_called == 1, "A valid cumulative counter update must be applied"
+    print("test_update_devices_skips_zero_counter_reset passed")
+
+
 def test_create_devices(plugin_module):
     print("\nRunning test_create_devices()")
     plugin_module.Devices = {}
@@ -221,6 +258,7 @@ def main():
     tests = [
         test_update_device,
         test_calculate_new_energy,
+        test_update_devices_skips_zero_counter_reset,
         test_create_devices,
         test_check_version,
     ]

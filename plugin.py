@@ -197,7 +197,21 @@ class GoodWeSEMSPlugin:
 
                 UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, str(inverter["output_current"]), AlwaysUpdate=True)
                 UpdateDevice(inverter["sn"], theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]), AlwaysUpdate=True)
-                UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000), AlwaysUpdate=True)
+                outputPowerValue = str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000)
+                currentPowerValue = Devices[inverter["sn"]].Units[theInverter.outputPowerUnit].sValue
+                try:
+                    currentEnergyCounter = float(currentPowerValue.split(";")[1])
+                except (IndexError, ValueError):
+                    currentEnergyCounter = 0
+                if inverter["etotal"] <= 0 and currentEnergyCounter > 0:
+                    logging.warning(
+                        "Skipping suspicious output power update for inverter '%s': current value '%s', new value '%s'",
+                        inverter["sn"],
+                        currentPowerValue,
+                        outputPowerValue,
+                    )
+                else:
+                    UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue, AlwaysUpdate=True)
                 inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
                 inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1]) #calculate the power based on P = I * V in Watt
                 UpdateDevice(inverter["sn"], theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
