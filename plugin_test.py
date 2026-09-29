@@ -263,29 +263,33 @@ class GoodWeOpenApiTest(unittest.TestCase):
         response.status_code = 200
         response.json.return_value = {
             "code": "00000",
-            "data": [
-                {"PowerStationId": "station-first"},
-                {"PowerStationId": "station-second"},
-            ],
+            "data": {"dataList": [{"id": "station-first"}, {"id": "station-second"}]},
         }
         post.return_value = response
         account = GoodWeSEMSPlus("au.semsportal.com", "443", "user@example.com", "password")
-        account.token = {"token": "sems-session-token", "client": "semsPlusWeb"}
+        account.token = {
+            "token": "sems-session-token",
+            "client": "semsPlusWeb",
+            "api": "https://au-gateway.semsportal.com/web/sems",
+        }
+        account.base_url = account.token["api"]
 
         result = account.powerStationListRequest()
 
-        self.assertEqual(result["data"][0]["PowerStationId"], "station-first")
+        self.assertEqual(result["dataList"][0]["id"], "station-first")
         self.assertEqual(
             post.call_args.args[0],
-            "https://au.semsportal.com/api/v3/PowerStation/GetPowerStationList",
+            "https://au-gateway.semsportal.com/web/sems/sems-plant/api/portal/stations/page",
         )
-        self.assertEqual(post.call_args.kwargs["json"], {})
-        self.assertEqual(json.loads(post.call_args.kwargs["headers"]["token"])["token"], "sems-session-token")
+        self.assertEqual(post.call_args.kwargs["json"], {"current": 1, "size": 100})
+        request_headers = post.call_args.kwargs["headers"]
+        self.assertEqual(json.loads(request_headers["token"])["token"], "sems-session-token")
+        self.assertTrue(request_headers["X-Signature"])
 
     @patch("GoodWe.requests.post")
     def test_power_station_list_request_rejects_api_error(self, post):
         response = Mock()
-        response.json.return_value = {"code": "100001", "msg": "invalid token"}
+        response.json.return_value = {"code": "S9999", "msg": "invalid token"}
         post.return_value = response
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
         account.token = {"token": "sems-session-token", "client": "semsPlusWeb"}

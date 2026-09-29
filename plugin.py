@@ -167,23 +167,26 @@ class GoodWeSEMSPlugin:
             response = self.goodWeAccount.powerStationListRequest()
             stations = response.get("data", response) if isinstance(response, dict) else response
             if isinstance(stations, dict):
-                if "PowerStationId" in stations:
+                if "PowerStationId" in stations or "id" in stations:
                     stations = [stations]
                 else:
                     stations = stations.get(
-                        "powerStationList",
-                        stations.get("PowerStationList", stations.get("list")),
+                        "dataList",
+                        stations.get(
+                            "powerStationList",
+                            stations.get("PowerStationList", stations.get("list")),
+                        ),
                     )
             if not isinstance(stations, list):
                 raise ValueError("Power station list response did not contain a station list")
 
             stationId = next(
                 (
-                    station.get("PowerStationId")
+                    station.get("PowerStationId", station.get("id"))
                     for station in stations
                     if isinstance(station, dict)
-                    and isinstance(station.get("PowerStationId"), str)
-                    and station["PowerStationId"].strip()
+                    and isinstance(station.get("PowerStationId", station.get("id")), str)
+                    and station.get("PowerStationId", station.get("id")).strip()
                 ),
                 None,
             )

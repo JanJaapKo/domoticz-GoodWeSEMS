@@ -250,10 +250,7 @@ def test_power_station_discovery_and_persistence(plugin_module):
             self.station_list_requests += 1
             return {
                 "code": "00000",
-                "data": [
-                    {"PowerStationId": "station-first"},
-                    {"PowerStationId": "station-second"},
-                ],
+                "dataList": [{"id": "station-first"}, {"id": "station-second"}],
             }
 
         def stationDataRequestV2(self, station_id):
