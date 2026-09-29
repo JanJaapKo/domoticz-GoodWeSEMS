@@ -29,15 +29,8 @@
             <li>Register your inverter at GoodWe SEMS portal (if not done already): <a href="https://www.semsportal.com">https://www.semsportal.com</a></li>
             <li>Choose one of the following options:</li>
             <ol type="a">
-                <li>You have to add one specific station to Domoticz follow the following steps:</li>
-                <ol>
-                    <li>Login to your account on: <a href="https://www.semsportal.com">www.semsportal.com</a></li>
-                    <li>Go to the plant status page for the station you want to add to Domoticz</li>
-                    <li>Get the station ID from the URL, this is the sequence of characters after: https://www.semsportal.com/PowerStation/PowerStatusSnMin/, in the pattern:
-                    (8 char)-(4 char)-(4 char)-(4 char)-(12 char), also known as a UUID </li>
-                    <li>Add the power station ID to the hardware configuration (mandatory)</li>
-                </ol>
-                <li>Not possible at this moment: If you want all of your stations added to Domoticz you only have to enter your login information below</li>
+                    <li>The first power station in your SEMS account is added to Domoticz automatically.</li>
+                    <li>Only one power station is supported per plugin instance.</li>
             </ol>
         </ul>
     </description>
@@ -52,7 +45,6 @@
         <param field="Port" label="SEMS API Port" width="30px" required="true" default="443"/>
         <param field="Username" label="E-Mail address" width="300px" required="true"/>
         <param field="Password" label="Password" width="100px" required="true" password="true"/>
-        <param field="Mode1" label="Power Station ID (mandatory)" width="300px"/>
         <param field="Mode2" label="Refresh interval" width="75px">
             <options>
                 <option label="10s" value="1"/>
@@ -109,6 +101,7 @@ class GoodWeSEMSPlugin:
     
     baseDeviceIndex = 0
     maxDeviceIndex = 0
+    powerStationId = ""
 
     def __init__(self):
         startNum = 0
@@ -132,6 +125,7 @@ class GoodWeSEMSPlugin:
         self.outputFreq1Unit = 18 + startNum
         self.inverterStateCommand = 19 + startNum
         self.enabled = False
+        self.powerStationId = ""
         return
 
     def establishToken(self):
@@ -150,22 +144,70 @@ class GoodWeSEMSPlugin:
         else:
             return True
 
-    def getDeviceData(self):            
+    def getDeviceData(self, stationId):
         if self.goodWeAccount.tokenAvailable:
             try:
-                DeviceData = self.goodWeAccount.stationDataRequestV2(Parameters["Mode1"])
+                DeviceData = self.goodWeAccount.stationDataRequestV2(stationId)
             except (exceptions.TooManyRetries, exceptions.FailureWithErrorCode, exceptions.FailureWithoutErrorCode) as exp:
                 logging.error("Failed to request data: " + str(exp))
                 Domoticz.Error("Failed to request data: " + str(exp))
                 return None
             return DeviceData
 
+    def getPowerStationId(self):
+        if self.powerStationId:
+            return self.powerStationId
+
+        configuredStationId = getConfigItem("PowerStationId", "")
+        if isinstance(configuredStationId, str) and configuredStationId.strip():
+            self.powerStationId = configuredStationId.strip()
+            return self.powerStationId
+
+        try:
+            response = self.goodWeAccount.powerStationListRequest()
+            stations = response.get("data", response) if isinstance(response, dict) else response
+            if isinstance(stations, dict):
+                if "PowerStationId" in stations:
+                    stations = [stations]
+                else:
+                    stations = stations.get(
+                        "powerStationList",
+                        stations.get("PowerStationList", stations.get("list")),
+                    )
+            if not isinstance(stations, list):
+                raise ValueError("Power station list response did not contain a station list")
+
+            stationId = next(
+                (
+                    station.get("PowerStationId")
+                    for station in stations
+                    if isinstance(station, dict)
+                    and isinstance(station.get("PowerStationId"), str)
+                    and station["PowerStationId"].strip()
+                ),
+                None,
+            )
+            if stationId is None:
+                raise ValueError("No power station ID was returned by SEMS")
+
+            self.powerStationId = stationId.strip()
+            setConfigItem(Key="PowerStationId", Value=self.powerStationId)
+            logging.info("Selected Power Station ID from SEMS account")
+            return self.powerStationId
+        except Exception as exp:
+            logging.error("Failed to retrieve Power Station ID: %s", exp)
+            Domoticz.Error("Failed to retrieve Power Station ID: " + str(exp))
+            return None
+
     def startDeviceUpdateV2(self):
         if self.establishToken() == False:
             logging.error("token not established")
             Domoticz.Error("token not established")
             return
-        DeviceData = self.getDeviceData()
+        stationId = self.getPowerStationId()
+        if not stationId:
+            return
+        DeviceData = self.getDeviceData(stationId)
         if DeviceData == None:
             logging.error("DeviceData == None")
             Domoticz.Error("DeviceData == None")
@@ -390,11 +432,6 @@ class GoodWeSEMSPlugin:
             self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
         self.runAgain = int(Parameters["Mode2"])
 
-        if len(Parameters["Mode1"]) == 0:
-            Domoticz.Error("No Power Station ID provided, exiting")
-            logging.error("No Power Station ID provided, exiting")
-            return
-            
         self.startDeviceUpdateV2()
 
     def onStop(self):
@@ -428,11 +465,6 @@ class GoodWeSEMSPlugin:
     def onHeartbeat(self):
         if self.enabled:
             if Parameters["Mode4"] == "Yes":
-                if len(Parameters["Mode1"]) == 0:
-                    Domoticz.Error("No Power Station ID provided, exiting")
-                    logging.error("No Power Station ID provided, exiting")
-                    return
-
                 self.runAgain = self.runAgain - 1
                 if self.runAgain <= 0:
                     logging.debug("onHeartbeat called, starting SEMS+ device update.")
@@ -442,10 +474,6 @@ class GoodWeSEMSPlugin:
 
             if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
                 logging.debug("onHeartbeat called, Connection is alive.")
-            elif len(Parameters["Mode1"]) == 0:
-                Domoticz.Error("No Power Station ID provided, exiting")
-                logging.error("No Power Station ID provided, exiting")
-                return
             else:
                 self.runAgain = self.runAgain - 1
                 if self.runAgain <= 0:

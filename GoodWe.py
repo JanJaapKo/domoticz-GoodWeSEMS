@@ -287,6 +287,28 @@ class GoodWe:
 
         return r.status_code
 
+    def powerStationListRequest(self):
+        """Retrieve the account's stations from the configured SEMS region."""
+        url = self.Address.rstrip("/") + "/v3/PowerStation/GetPowerStationList"
+        response = requests.post(
+            url,
+            headers=self.apiRequestHeadersV2(),
+            json={},
+            timeout=10,
+        )
+        response.raise_for_status()
+        try:
+            api_response = response.json()
+        except json.decoder.JSONDecodeError as exp:
+            raise exceptions.GoodweException("Power station list response was not valid JSON") from exp
+
+        if isinstance(api_response, dict) and "code" in api_response and api_response["code"] not in _SuccessCodes:
+            raise exceptions.GoodweException(
+                "Power station list request failed: "
+                + str(api_response.get("msg", api_response["code"]))
+            )
+        return api_response
+
     def stationDataRequestV2(self, stationId):
         for i in range(1, 4):
             try:

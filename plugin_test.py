@@ -8,6 +8,7 @@ from GoodWe import GoodWeSEMSPlus
 from GoodWe import NEW_LOGIN_URL
 from GoodWe import PowerStation
 from GoodWe import Inverter
+import exceptions
 import logging
 
 
@@ -256,6 +257,42 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
 
 
 class GoodWeOpenApiTest(unittest.TestCase):
+    @patch("GoodWe.requests.post")
+    def test_power_station_list_request_uses_configured_regional_server(self, post):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "code": "00000",
+            "data": [
+                {"PowerStationId": "station-first"},
+                {"PowerStationId": "station-second"},
+            ],
+        }
+        post.return_value = response
+        account = GoodWeSEMSPlus("au.semsportal.com", "443", "user@example.com", "password")
+        account.token = {"token": "sems-session-token", "client": "semsPlusWeb"}
+
+        result = account.powerStationListRequest()
+
+        self.assertEqual(result["data"][0]["PowerStationId"], "station-first")
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://au.semsportal.com/api/v3/PowerStation/GetPowerStationList",
+        )
+        self.assertEqual(post.call_args.kwargs["json"], {})
+        self.assertEqual(json.loads(post.call_args.kwargs["headers"]["token"])["token"], "sems-session-token")
+
+    @patch("GoodWe.requests.post")
+    def test_power_station_list_request_rejects_api_error(self, post):
+        response = Mock()
+        response.json.return_value = {"code": "100001", "msg": "invalid token"}
+        post.return_value = response
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.token = {"token": "sems-session-token", "client": "semsPlusWeb"}
+
+        with self.assertRaisesRegex(exceptions.GoodweException, "invalid token"):
+            account.powerStationListRequest()
+
     @patch("GoodWe.requests.post")
     def test_openapi_methods_use_documented_request_contracts(self, post):
         device_response = Mock()
