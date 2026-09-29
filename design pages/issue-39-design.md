@@ -15,7 +15,7 @@ Resolve a user's Power Station ID through `GetPowerStationList` so initial setup
 1. Authenticate using the existing account flow.
 2. Request the station list through a new account-layer method for `POST https://eu.semsportal.com/api/v3/PowerStation/GetPowerStationList` (derive the regional host from the configured SEMS server rather than hard-coding Europe).
 3. Validate the response and select the first entry with a non-empty `PowerStationId`.
-4. Keep the selected ID on the account/plugin instance and pass it to the existing `stationDataRequestV2()` call. Reuse it for heartbeat updates instead of querying the station list on every poll.
+4. Keep the selected ID on the account/plugin instance as a Configuration Item and pass it to the existing `stationDataRequestV2()` call. Reuse it for heartbeat updates instead of querying the station list on every poll.
 5. If the request fails, the response is malformed, or no station has an ID, log and report a clear error and skip the telemetry update. Do not silently fall back to a manually configured ID.
 
 The station lookup belongs in `GoodWe.py` next to the other authenticated API methods. `plugin.py` should own the startup/polling sequence and no longer gate execution on `Mode1` being populated.
