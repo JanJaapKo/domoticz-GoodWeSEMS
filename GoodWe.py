@@ -92,8 +92,29 @@ class Inverter:
     inverterStateCommand = 19
 
     def __init__(self, inverterData):
-        self._sn = inverterData["sn"]
-        self._name = inverterData["name"]
+        if not isinstance(inverterData, dict):
+            raise TypeError("Inverter data must be a dictionary")
+
+        self._sn = (
+            inverterData.get("sn")
+            or inverterData.get("serialNumber")
+            or inverterData.get("id")
+            or "unknown"
+        )
+        self._name = (
+            inverterData.get("name")
+            or inverterData.get("deviceName")
+            or inverterData.get("title")
+            or inverterData.get("model")
+            or self._sn
+        )
+
+        if "name" not in inverterData and self._sn:
+            logging.warning(
+                "SEMS inverter payload missing 'name' for serial '%s'; using fallback name '%s'",
+                self._sn,
+                self._name,
+            )
 
     def __repr__(self):
         return "Inverter type: '" + self._name + "' with serial number: '" + self._sn + "'"
@@ -121,23 +142,62 @@ class PowerStation:
     def __init__(self, stationData=None, id=None, firstDevice=0):
         self.inverters = {}
         if stationData is None:
-            self._id = id
-        else:
+            self._id = id or ""
+            self._name = ""
+            self._address = ""
             self._firstDevice = firstDevice
-            self._name = stationData["info"]["stationname"]
-            self._address = stationData["info"]["address"]
-            self._id = stationData["info"]["powerstation_id"]
-            logging.debug("create station with id: '" + self._id + "' and inverters: " + str(len(stationData["inverter"])) )
-            self.createInverters(stationData["inverter"])
+            return
+
+        self._firstDevice = firstDevice
+        info = stationData.get("info", {}) if isinstance(stationData, dict) else {}
+        self._id = (
+            info.get("powerstation_id")
+            or info.get("powerStationId")
+            or info.get("id")
+            or stationData.get("id")
+            or id
+            or ""
+        )
+        self._name = (
+            info.get("stationname")
+            or info.get("name")
+            or info.get("powerstation_name")
+            or self._id
+            or "unknown station"
+        )
+        self._address = info.get("address") or info.get("station_address") or ""
+
+        inverter_data = stationData.get("inverter", []) if isinstance(stationData, dict) else []
+        if not isinstance(inverter_data, list):
+            logging.warning(
+                "SEMS station payload for station '%s' did not contain a valid inverter list; creating empty station model",
+                self._id or "unknown",
+            )
+            inverter_data = []
+
+        logging.debug("create station with id: '%s' and inverters: %s", self._id, len(inverter_data))
+        self.createInverters(inverter_data)
             
     def __repr__(self):
         return "Station ID: '" + self._id + "', name: '" + self._name + "', inverters: " + str(len(self.inverters))
     
     def createInverters(self, inverterData):
         for inverter in inverterData:
-            self.inverters[inverter['sn']] = Inverter(inverter)
-            logging.debug("inverter created: '" + str(inverter['sn']) + "'")
-            self._firstDevice += self.inverters[inverter['sn']].domoticzDevices
+            if not isinstance(inverter, dict):
+                logging.warning("Ignoring non-dictionary inverter payload in power station '%s'", self._id or "unknown")
+                continue
+
+            serial = inverter.get("sn") or inverter.get("serialNumber") or inverter.get("id")
+            if not serial:
+                logging.warning(
+                    "Ignoring inverter payload without serial number in power station '%s'",
+                    self._id or "unknown",
+                )
+                continue
+
+            self.inverters[serial] = Inverter(inverter)
+            logging.debug("inverter created: '%s'", serial)
+            self._firstDevice += self.inverters[serial].domoticzDevices
   
     @property
     def id(self):

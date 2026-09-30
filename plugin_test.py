@@ -35,6 +35,11 @@ class BasicInverterTest(unittest.TestCase):
     def test_invType(self):
         self.assertEqual(self.inverter.type, "name_simple")
 
+    def test_invWithoutNameFallsBackToSerialNumber(self):
+        inverter = Inverter({"sn": "sn_no_name"})
+        self.assertEqual(inverter.serialNumber, "sn_no_name")
+        self.assertEqual(inverter.type, "sn_no_name")
+
 
 class PowerStationTest(unittest.TestCase):
     powerStation = None
@@ -145,6 +150,17 @@ class PowerStationTest(unittest.TestCase):
             2,
             msg="Double PS num inv fail: " + str(self.powerStationDouble.numInverters),
         )
+
+    def test_partialStationInfoDoesNotCrash(self):
+        station_data = {
+            "info": {"powerstation_id": "station-without-name"},
+            "inverter": [{"sn": "inv_without_name"}],
+        }
+        station = PowerStation(stationData=station_data)
+        self.assertEqual(station.id, "station-without-name")
+        self.assertEqual(station.name, "station-without-name")
+        self.assertEqual(station.numInverters, 1)
+        self.assertEqual(station.inverters["inv_without_name"].type, "inv_without_name")
 
     # def test_doublePowerStation(self):
 
