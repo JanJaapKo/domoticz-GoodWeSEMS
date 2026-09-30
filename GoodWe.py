@@ -210,14 +210,14 @@ class GoodWe:
         logging.debug("PowerStation created: '" + powerStation.id + "'")
 
     def apiRequestHeadersV2(self):
-        logging.debug("build apiRequestHeaders with token: '%s'", json.dumps(self.token))
+        logging.debug("build apiRequestHeaders")
         return {
             'User-Agent': _BrowserUserAgent,
             'token': json.dumps(self.token)
         }
 
     def tokenRequest(self):
-        logging.debug("build tokenRequest with UN: '" + self.Username + "', pwd: '" + self.Password +"'")
+        logging.debug("build tokenRequest")
         url = '/v2/Common/CrossLogin'
         loginPayload = {
             'account': self.Username,
@@ -242,14 +242,6 @@ class GoodWe:
             self.tokenAvailable = False
             return
 
-        try:
-            with open("/tmp/goodwe_token_response.json", "w") as f:
-                json.dump(apiResponse, f, indent=2)
-            logging.info("Saved raw token response to /tmp/goodwe_token_response.json")
-            logging.debug("token response: " + json.dumps(apiResponse))
-        except Exception as exp:
-            logging.error("Failed to save token response: " + str(exp))
-
         if apiResponse.get("code") == 100005:
             raise exceptions.GoodweException("invalid password or username")
 
@@ -263,7 +255,7 @@ class GoodWe:
             apiUrl = apiResponse["api"]
 
         if not apiUrl:
-            logging.error("Unexpected API response, no 'api' key: %s", apiResponse)
+            logging.error("Unexpected API response, no 'api' key")
             Domoticz.Error("Unexpected API response, no 'api' key")
             self.tokenAvailable = False
             return
@@ -272,7 +264,7 @@ class GoodWe:
             self.tokenAvailable = False
         else:
             self.token = apiResponse.get('data', {})
-            logging.debug("SEMS API Token received: " + json.dumps(self.token))
+            logging.debug("SEMS API token received")
             self.tokenAvailable = True
             self.base_url = apiUrl + "/v2"
         
@@ -286,6 +278,28 @@ class GoodWe:
         logging.debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
 
         return r.status_code
+
+    def powerStationListRequest(self):
+        """Retrieve the account's stations from the configured SEMS region."""
+        url = self.Address.rstrip("/") + "/v3/PowerStation/GetPowerStationList"
+        response = requests.post(
+            url,
+            headers=self.apiRequestHeadersV2(),
+            json={},
+            timeout=10,
+        )
+        response.raise_for_status()
+        try:
+            api_response = response.json()
+        except json.decoder.JSONDecodeError as exp:
+            raise exceptions.GoodweException("Power station list response was not valid JSON") from exp
+
+        if isinstance(api_response, dict) and "code" in api_response and api_response["code"] not in _SuccessCodes:
+            raise exceptions.GoodweException(
+                "Power station list request failed: "
+                + str(api_response.get("msg", api_response["code"]))
+            )
+        return api_response
 
     def stationDataRequestV2(self, stationId):
         for i in range(1, 4):
@@ -364,6 +378,35 @@ class GoodWeSEMSPlus(GoodWe):
     """
     A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
     """
+
+    def powerStationListRequest(self):
+        """Retrieve stations from the authenticated SEMS+ Web API."""
+        url_part = "/sems-plant/api/portal/stations/page"
+        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+        headers = self.apiRequestHeadersV2()
+        if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
+            signature = self._generate_signature(self.token)
+            if signature:
+                headers["X-Signature"] = signature
+
+        response = requests.post(
+            api_base + url_part,
+            headers=headers,
+            json={"current": 1, "size": 100},
+            timeout=10,
+        )
+        response.raise_for_status()
+        try:
+            api_response = response.json()
+        except json.decoder.JSONDecodeError as exp:
+            raise exceptions.GoodweException("Power station list response was not valid JSON") from exp
+
+        if isinstance(api_response, dict) and "code" in api_response and api_response["code"] not in _SuccessCodes:
+            raise exceptions.GoodweException(
+                "Power station list request failed: "
+                + str(api_response.get("msg", api_response["code"]))
+            )
+        return api_response.get("data", api_response) if isinstance(api_response, dict) else api_response
 
     def _openApiPost(self, path, payload):
         if not isinstance(self.token, dict) or not self.token.get("token"):
@@ -512,8 +555,7 @@ class GoodWeSEMSPlus(GoodWe):
             "isChinese": False,
             "isLocal": True,
         }
-        logging.debug("SEMS+ login data "+str(login_data))
-        logging.debug("SEMS+ header data "+str(_NewLoginHeaders))
+        logging.debug("building SEMS+ login request")
         try:
             # Ensure a browser User-Agent is present while preserving endpoint headers
             headers = {"User-Agent": _BrowserUserAgent, **_NewLoginHeaders}
@@ -553,7 +595,7 @@ class GoodWeSEMSPlus(GoodWe):
         return self._extract_login_token(apiResponse, _LegacyApiFallback)
 
     def apiRequestHeadersV2(self):
-        logging.debug("build SEMS+ apiRequestHeaders with token: '%s'", json.dumps(self.token))
+        logging.debug("build SEMS+ apiRequestHeaders")
         return {
             "User-Agent": _BrowserUserAgent,
             'Content-Type': 'application/json',
@@ -575,7 +617,7 @@ class GoodWeSEMSPlus(GoodWe):
         self.token = token_data
         self.tokenAvailable = True
         self.base_url = self.token.get("api")
-        logging.debug("SEMS+ API Token received: %s", json.dumps(self.token))
+        logging.debug("SEMS+ API token received for region: %s", self.token.get("region", "unknown"))
         return 200
 
     def stationDataRequest(self, stationId):

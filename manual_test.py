@@ -235,6 +235,84 @@ def test_create_devices(plugin_module):
     print("test_create_devices passed")
 
 
+def test_power_station_discovery_and_persistence(plugin_module):
+    print("\nRunning test_power_station_discovery_and_persistence()")
+    fakeDomoticz_module.configuration_store.pop("PowerStationId", None)
+
+    class FakeGoodWeAccount:
+        tokenAvailable = True
+
+        def __init__(self):
+            self.station_list_requests = 0
+            self.telemetry_station_ids = []
+
+        def powerStationListRequest(self):
+            self.station_list_requests += 1
+            return {
+                "code": "00000",
+                "dataList": [{"id": "station-first"}, {"id": "station-second"}],
+            }
+
+        def stationDataRequestV2(self, station_id):
+            self.telemetry_station_ids.append(station_id)
+            return {"inverter": []}
+
+        def createStationV2(self, station_data):
+            pass
+
+    account = FakeGoodWeAccount()
+    plugin = plugin_module._plugin
+    plugin_module.Parameters.pop("Mode1", None)
+    plugin.powerStationId = ""
+    plugin.goodWeAccount = account
+    plugin.establishToken = lambda: True
+    plugin.updateDevices = lambda station_data: None
+    plugin.startDeviceUpdateV2()
+    plugin.startDeviceUpdateV2()
+
+    assert account.station_list_requests == 1, "Station list should be fetched only once"
+    assert account.telemetry_station_ids == ["station-first", "station-first"]
+    assert fakeDomoticz_module.configuration_store["PowerStationId"] == "station-first"
+
+    heartbeat_updates = []
+    plugin.enabled = True
+    plugin.runAgain = 1
+    plugin_module.Parameters["Mode4"] = "Yes"
+    plugin_module.Parameters["Mode2"] = "30"
+    plugin.startDeviceUpdateV2 = lambda: heartbeat_updates.append(True)
+    plugin.onHeartbeat()
+    assert heartbeat_updates == [True], "Heartbeat should schedule an update without Mode1"
+    print("test_power_station_discovery_and_persistence passed")
+
+
+def test_station_discovery_failure_skips_telemetry(plugin_module):
+    print("\nRunning test_station_discovery_failure_skips_telemetry()")
+    fakeDomoticz_module.configuration_store.pop("PowerStationId", None)
+
+    class FakeGoodWeAccount:
+        tokenAvailable = True
+
+        def __init__(self):
+            self.telemetry_requests = 0
+
+        def powerStationListRequest(self):
+            return {"code": "00000", "data": [{"name": "station-without-id"}]}
+
+        def stationDataRequestV2(self, station_id):
+            self.telemetry_requests += 1
+            raise AssertionError("Telemetry must not be requested without a station ID")
+
+    account = FakeGoodWeAccount()
+    plugin = plugin_module._plugin
+    plugin.powerStationId = ""
+    plugin.goodWeAccount = account
+    plugin.establishToken = lambda: True
+    plugin.startDeviceUpdateV2()
+
+    assert account.telemetry_requests == 0
+    print("test_station_discovery_failure_skips_telemetry passed")
+
+
 def test_check_version(plugin_module):
     print("\nRunning test_check_version()")
     fakeDomoticz_module.configuration_store.clear()
@@ -260,6 +338,8 @@ def main():
         test_calculate_new_energy,
         test_update_devices_skips_zero_counter_reset,
         test_create_devices,
+        test_power_station_discovery_and_persistence,
+        test_station_discovery_failure_skips_telemetry,
         test_check_version,
     ]
 
