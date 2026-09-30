@@ -59,8 +59,7 @@ Example responsibility:
 
 - read `sn` as the primary identifier
 - read `name` if present
-- otherwise fall back to a known alternative field such as `deviceName`, `title`, or `model`
-- if no human-readable name is present, use the serial number as a display fallback
+- if no human-readable name is present, use the serial number `sn` as a display fallback
 - if required fields are still missing, log a warning and continue with a placeholder name
 
 This prevents `KeyError` and keeps the plugin alive even when the upstream API omits optional metadata.
