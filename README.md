@@ -3,6 +3,8 @@ Domoticz GoodWe Solar Inverter plugin (SEMS API)
 This plugin provides information about your GoodWe solar inverter too Domoticz. This plugin has been made by analysing requests made by the GoodWe SEMS Portal website and following the API documentation provided by GoodWe.
 
 This plugin was created by Dylian94 ([/dylian94/domoticz-GoodWeSEMS](https://github.com/dylian94/domoticz-GoodWeSEMS)) but that version is out of maintenance. Additional credits to [Mark Ruys' gw2pvo](https://github.com/markruys/gw2pvo) for getting the API calls right.......
+Most recently a lot of inspiration is taken from [TimSoethout
+goodwe-sems-home-assistant](https://github.com/TimSoethout/goodwe-sems-home-assistant)
 
 
 Important update note (v5)
