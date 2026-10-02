@@ -681,36 +681,7 @@ class GoodWeSEMSPlus(GoodWe):
         return 200
 
     def stationDataRequest(self, stationId):
-        url = _PowerStationURLPart
-        payload = {
-            'powerStationId': stationId
-        }
-
-        api_base = self._resolve_api_base_for_url_part(self.base_url, url)
-        r = requests.post(api_base + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
-        logging.debug("building SEMS+ station data request on URL: %s which returned status code: %s and response length = %s", r.url, r.status_code, len(r.text))
-        try:
-            apiResponse = r.json()
-        except json.decoder.JSONDecodeError as exp:
-            logging.error("SEMS+ station data request JSONDecodeError: %s", exp)
-            Domoticz.Error("SEMS+ station data request JSONDecodeError: " + str(exp))
-            return False
-        logging.debug("response station data request : %s", json.dumps(apiResponse))
-
-        # If the legacy monitor endpoint returns no usable inverter data,
-        # fall back to SEMS+ Web endpoints and synthesize a compatible structure.
-        try:
-            data = apiResponse.get("data") if isinstance(apiResponse, dict) else None
-            if not data or not isinstance(data.get("inverter"), list) or len(data.get("inverter")) == 0:
-                logging.info("Legacy SEMS monitor endpoint returned no inverter data; using SEMS+ Web fallback")
-                web_data = self.getWebData(stationId)
-                return web_data
-        except Exception:
-            logging.debug("No usable legacy data, attempting SEMS+ Web fallback")
-            web_data = self.getWebData(stationId)
-            return web_data
-
-        return apiResponse
+        return self.getWebData(stationId)
 
     def _generate_signature(self, token_data):
         # Generate X-Signature header used by SEMS+ Web endpoints
