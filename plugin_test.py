@@ -220,6 +220,36 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
 
         self.assertEqual(account.stationDataRequestV2("station-uuid"), expected)
 
+    @patch("GoodWe.requests.post")
+    def test_semsplus_station_data_request_skips_legacy_monitor_route(self, post):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        expected = {"inverter": [{"sn": "serial-1"}]}
+        account.getWebData = Mock(return_value=expected)
+
+        result = account.stationDataRequest("station-uuid")
+
+        self.assertIs(result, expected)
+        account.getWebData.assert_called_once_with("station-uuid")
+        post.assert_not_called()
+
+    @patch("GoodWe.requests.post")
+    def test_legacy_station_data_request_still_uses_monitor_route(self, post):
+        response = Mock()
+        response.url = "https://eu.semsportal.com/api/v2/PowerStation/GetMonitorDetailByPowerstationId"
+        response.status_code = 200
+        response.text = "{}"
+        response.json.return_value = {}
+        post.return_value = response
+        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
+
+        account.stationDataRequest("station-uuid")
+
+        post.assert_called_once()
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://eu.semsportal.com/api/PowerStation/GetMonitorDetailByPowerstationId",
+        )
+
     def test_unknown_sems_status_maps_from_live_output(self):
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
         account.getWebInverterDevices = lambda station_id: [{
