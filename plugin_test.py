@@ -235,7 +235,7 @@ class PluginBehaviorTest(unittest.TestCase):
     def test_establish_token_refreshes_account_state(self):
         plugin = self.plugin_module._plugin
         account = Mock(tokenAvailable=False, powerStationList={1: "stale"}, powerStationIndex=2)
-        account.tokenRequest.return_value = 200
+        account.tokenRequest.side_effect = lambda: setattr(account, "tokenAvailable", True)
         plugin.goodWeAccount = account
         plugin.devicesUpdated = True
 
@@ -245,6 +245,29 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertEqual(account.powerStationList, {})
         self.assertEqual(account.powerStationIndex, 0)
         self.assertFalse(plugin.devicesUpdated)
+
+    def test_establish_token_keeps_an_existing_session(self):
+        plugin = self.plugin_module._plugin
+        account = Mock(tokenAvailable=True)
+        plugin.goodWeAccount = account
+
+        self.assertTrue(plugin.establishToken())
+
+        account.tokenRequest.assert_not_called()
+
+    def test_semsplus_device_update_does_not_force_periodic_login(self):
+        plugin = self.plugin_module._plugin
+        self.plugin_module.Parameters["Mode4"] = "No"
+        plugin.establishToken = Mock(return_value=True)
+        plugin.getPowerStationId = Mock(return_value="station-uuid")
+        plugin.getDeviceData = Mock(return_value={"inverter": []})
+        plugin.goodWeAccount = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        plugin.updateDevices = Mock()
+
+        plugin.startDeviceUpdateV2()
+
+        plugin.establishToken.assert_called_once_with()
+        plugin.getDeviceData.assert_called_once_with("station-uuid")
 
     def test_establish_token_handles_known_api_errors(self):
         plugin = self.plugin_module._plugin
@@ -748,10 +771,57 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
 
     def test_web_request_failures_return_empty_results(self):
         timeout = goodwe_module.requests.exceptions.Timeout("offline")
+        self.account.tokenRequest = Mock()
         with patch("GoodWe.requests.get", side_effect=timeout):
             self.assertEqual(self.account.getWebInverterDevices("station-uuid"), [])
             self.assertEqual(self.account.getWebInverterTelemetry("station-uuid", "serial-1"), {})
             self.assertEqual(self.account.getWebInverterTelecounting("station-uuid", "serial-1"), {})
+            self.account.getWebData("station-uuid")
+        self.account.tokenRequest.assert_not_called()
+
+    def test_empty_web_device_response_is_logged_at_debug_level(self):
+        response_body = '{"data":{"deviceDetailList":[]}}'
+        response = make_response({"data": {"deviceDetailList": []}})
+        response.text = response_body
+
+        with patch("GoodWe.requests.get", return_value=response):
+            with self.assertLogs(level="DEBUG") as captured:
+                self.assertEqual(self.account.getWebInverterDevices("station-uuid"), [])
+
+        self.assertTrue(any(response_body in message for message in captured.output))
+
+    def test_empty_or_c0602_device_response_refreshes_session_and_retries_once(self):
+        successful_response = make_response({"data": {"deviceDetailList": [
+            {"deviceType": "INVERTER", "statusDetailList": [
+                {"snList": ["serial-1"], "detailMap": {"serial-1": {"sn": "serial-1"}}},
+            ]},
+        ]}})
+        first_responses = [
+            make_response({"data": {"deviceDetailList": []}}),
+            make_response({"code": "C0602", "msg": "session expired"}),
+        ]
+
+        for first_response in first_responses:
+            with self.subTest(payload=first_response.json.return_value):
+                account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+                account.base_url = "https://eu-gateway.semsportal.com/web/sems"
+                account.token = {
+                    "uid": "user-id",
+                    "token": "sems-token",
+                    "client": "semsPlusWeb",
+                    "api": account.base_url,
+                }
+                account.tokenAvailable = True
+                account.tokenRequest = Mock(side_effect=lambda: setattr(account, "tokenAvailable", True) or 200)
+                account.getWebInverterTelemetry = Mock(return_value={})
+                account.getWebInverterTelecounting = Mock(return_value={})
+
+                with patch("GoodWe.requests.get", side_effect=[first_response, successful_response]) as get:
+                    result = account.getWebData("station-uuid")
+
+                self.assertEqual(len(result["inverter"]), 1)
+                self.assertEqual(get.call_count, 2)
+                account.tokenRequest.assert_called_once_with()
 
     def test_get_web_data_merges_device_telemetry_counters_and_plugin_defaults(self):
         devices = [
@@ -883,6 +953,30 @@ class GoodWeOpenApiTest(unittest.TestCase):
         request_headers = post.call_args.kwargs["headers"]
         self.assertEqual(json.loads(request_headers["token"])["token"], "sems-session-token")
         self.assertTrue(request_headers["X-Signature"])
+
+    @patch("GoodWe.requests.post")
+    def test_power_station_list_request_refreshes_session_once_on_c0602(self, post):
+        expired_response = make_response({"code": "C0602", "msg": "session expired"})
+        success_response = make_response({
+            "code": "00000",
+            "data": {"dataList": [{"id": "station-first"}]},
+        })
+        post.side_effect = [expired_response, success_response]
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.base_url = "https://eu-gateway.semsportal.com/web/sems"
+        account.token = {
+            "token": "sems-session-token",
+            "client": "semsPlusWeb",
+            "api": account.base_url,
+        }
+        account.tokenAvailable = True
+        account.tokenRequest = Mock(side_effect=lambda: setattr(account, "tokenAvailable", True) or 200)
+
+        result = account.powerStationListRequest()
+
+        self.assertEqual(result["dataList"][0]["id"], "station-first")
+        self.assertEqual(post.call_count, 2)
+        account.tokenRequest.assert_called_once_with()
 
     @patch("GoodWe.requests.post")
     def test_power_station_list_request_rejects_api_error(self, post):
