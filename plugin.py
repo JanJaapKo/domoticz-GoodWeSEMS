@@ -135,8 +135,9 @@ class GoodWeSEMSPlugin:
             self.goodWeAccount.powerStationIndex = 0
             self.devicesUpdated = False
             try:
+                self.goodWeAccount.tokenAvailable = False
                 self.goodWeAccount.tokenRequest()
-                return True
+                return self.goodWeAccount.tokenAvailable
             except (exceptions.GoodweException, exceptions.FailureWithMessage, exceptions.FailureWithoutMessage) as exp:
                 logging.error("Failed to request data: " + str(exp))
                 Domoticz.Error("Failed to request data: " + str(exp))

@@ -439,34 +439,45 @@ class GoodWeSEMSPlus(GoodWe):
     A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
     """
 
+    def _refreshWebSession(self):
+        logging.info("SEMS+ session rejected; requesting a fresh login")
+        self.tokenAvailable = False
+        return self.tokenRequest() == 200 and self.tokenAvailable
+
     def powerStationListRequest(self):
         """Retrieve stations from the authenticated SEMS+ Web API."""
         url_part = "/sems-plant/api/portal/stations/page"
-        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
-        headers = self.apiRequestHeadersV2()
-        if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
-            signature = self._generate_signature(self.token)
-            if signature:
-                headers["X-Signature"] = signature
+        for attempt in range(2):
+            api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+            headers = self.apiRequestHeadersV2()
+            if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
+                signature = self._generate_signature(self.token)
+                if signature:
+                    headers["X-Signature"] = signature
 
-        response = requests.post(
-            api_base + url_part,
-            headers=headers,
-            json={"current": 1, "size": 100},
-            timeout=10,
-        )
-        response.raise_for_status()
-        try:
-            api_response = response.json()
-        except json.decoder.JSONDecodeError as exp:
-            raise exceptions.GoodweException("Power station list response was not valid JSON") from exp
-
-        if isinstance(api_response, dict) and "code" in api_response and api_response["code"] not in _SuccessCodes:
-            raise exceptions.GoodweException(
-                "Power station list request failed: "
-                + str(api_response.get("msg", api_response["code"]))
+            response = requests.post(
+                api_base + url_part,
+                headers=headers,
+                json={"current": 1, "size": 100},
+                timeout=10,
             )
-        return api_response.get("data", api_response) if isinstance(api_response, dict) else api_response
+            response.raise_for_status()
+            try:
+                api_response = response.json()
+            except json.decoder.JSONDecodeError as exp:
+                raise exceptions.GoodweException("Power station list response was not valid JSON") from exp
+
+            if isinstance(api_response, dict) and str(api_response.get("code", "")).upper() == "C0602":
+                logging.debug("SEMS+ stations/page returned C0602; response body: %s", response.text)
+                if attempt == 0 and self._refreshWebSession():
+                    continue
+
+            if isinstance(api_response, dict) and "code" in api_response and api_response["code"] not in _SuccessCodes:
+                raise exceptions.GoodweException(
+                    "Power station list request failed: "
+                    + str(api_response.get("msg", api_response["code"]))
+                )
+            return api_response.get("data", api_response) if isinstance(api_response, dict) else api_response
 
     def _openApiPost(self, path, payload):
         if not isinstance(self.token, dict) or not self.token.get("token"):
@@ -708,6 +719,7 @@ class GoodWeSEMSPlus(GoodWe):
         return factors
 
     def getWebInverterDevices(self, powerStationId):
+        self._webDeviceListRequiresRelogin = False
         url_part = f"/sems-plant/api/stations/device/all-status?stationId={powerStationId}"
         api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
         headers = self.apiRequestHeadersV2()
@@ -723,6 +735,11 @@ class GoodWeSEMSPlus(GoodWe):
         except Exception as exp:
             logging.error("getWebInverterDevices request failed: %s", exp)
             Domoticz.Error("getWebInverterDevices request failed: " + str(exp))
+            return []
+
+        if isinstance(json_response, dict) and str(json_response.get("code", "")).upper() == "C0602":
+            self._webDeviceListRequiresRelogin = True
+            logging.debug("SEMS+ all-status returned C0602 (HTTP %s); response body: %s", r.status_code, r.text)
             return []
 
         result = json_response.get("data") if isinstance(json_response, dict) else None
@@ -749,6 +766,13 @@ class GoodWeSEMSPlus(GoodWe):
                         device["deviceType"] = device_type
                         device["status"] = status_group.get("status")
                         devices.append(device)
+        if not devices:
+            self._webDeviceListRequiresRelogin = True
+            logging.debug(
+                "SEMS+ all-status returned no supported devices (HTTP %s); response body: %s",
+                r.status_code,
+                r.text,
+            )
         return devices
 
     def getWebInverterTelemetry(self, powerStationId, serialNumber, device_type="INVERTER"):
@@ -847,6 +871,10 @@ class GoodWeSEMSPlus(GoodWe):
         # Build the legacy-shaped data object from SEMS+ Web responses
         inverters = []
         devices = self.getWebInverterDevices(powerStationId)
+        if not devices and self._webDeviceListRequiresRelogin:
+            logging.info("SEMS+ all-status returned no devices; refreshing the session and retrying once")
+            if self._refreshWebSession():
+                devices = self.getWebInverterDevices(powerStationId)
         for device in devices:
             sn = device.get("sn") or device.get("sn")
             if not isinstance(sn, str):
