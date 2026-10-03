@@ -59,7 +59,7 @@ git pull
 Contributing
 ------------
 Even if you do not know how to develop software you can help by using the [GitHub Issues](https://github.com/janjaapko/domoticz-GoodWeSEMS/issues)
-for feature request or bug reports. If you DO know how to develop software please help improving this project by submitting pull-requests. Make sure to update and run the included unit tests (```python plugin_test.py```) prior to submitting
+for feature requests or bug reports. If you know how to develop software, please help improve this project by submitting pull requests. Read [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and regression-test commands. GitHub Actions runs these checks on pushes and pull requests.
 
 Current features
 ----------------
