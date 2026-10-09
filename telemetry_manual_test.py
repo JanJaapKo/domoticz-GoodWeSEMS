@@ -9,6 +9,7 @@ import json
 import logging
 import sys, os
 
+import GoodWe as goodwe_module
 from GoodWe import GoodWeSEMSPlus
 
 # Set these values before running the script.
@@ -63,77 +64,37 @@ def main():
         print("Token request failed; check the SEMS+ server and account credentials.", file=sys.stderr)
         return 1
 
-    print(f"===== Querying telemetry for station {station_id}... =====")
+    print(f"===== Querying Domoticz telemetry for station {station_id}... =====")
+    original_get = goodwe_module.requests.get
+
+    def print_response_body(*args, **kwargs):
+        response = original_get(*args, **kwargs)
+        try:
+            response_body = response.json()
+        except Exception:
+            response_body = response.text
+        print(f"\n===== GET {response.url} (HTTP {response.status_code}) =====")
+        print(json.dumps(response_body, indent=2, sort_keys=True, default=str))
+        return response
+
+    goodwe_module.requests.get = print_response_body
     try:
-        sems_response = account.stationDataRequest(station_id)
+        station_data = account.stationDataRequestV2(station_id)
     except Exception as error:
-        sems_response = None
-        logger.exception("SEMS+ telemetry request failed")
+        logger.exception("SEMS+ Domoticz telemetry request failed")
         print(f"SEMS+ telemetry request failed: {error}", file=sys.stderr)
+        return 1
+    finally:
+        goodwe_module.requests.get = original_get
 
-    print("\n===== SEMS+ result =====")
-    print(json.dumps(sems_response, indent=2, sort_keys=True, default=str))
-    sems_data = sems_response.get("data", sems_response) if isinstance(sems_response, dict) else {}
-    sems_inverters = sems_data.get("inverter", []) if isinstance(sems_data, dict) else []
-    print(f"SEMS+ devices returned: {len(sems_inverters)}")
-
-    telemetry_count = 0
-    try:
-        logger.info("OPENAPI START Query Device List Under Station: stationId=%s", station_id)
-        print(f"\n===== OPENAPI START Query Device List Under Station: {station_id} =====")
-        device_list_response = account.openApiDeviceListRequest(station_id)
-        device_list_json = json.dumps(device_list_response, indent=2, sort_keys=True, default=str)
-        logger.info("OPENAPI RESULT Query Device List Under Station:\n%s", device_list_json)
-        print("===== OPENAPI RESULT Query Device List Under Station =====")
-        print(device_list_json)
-
-        response_data = device_list_response.get("data", [])
-        plants = response_data if isinstance(response_data, list) else []
-        devices_by_type = {}
-        for plant in plants:
-            if not isinstance(plant, dict) or plant.get("plantId") != station_id:
-                continue
-            for device in plant.get("deviceData", []):
-                if not isinstance(device, dict):
-                    continue
-                serial_number = device.get("deviceSn")
-                device_type = device.get("deviceType")
-                if isinstance(serial_number, str) and isinstance(device_type, int):
-                    devices_by_type.setdefault(device_type, []).append(serial_number)
-
-        for device_type, serial_numbers in devices_by_type.items():
-            for offset in range(0, len(serial_numbers), 100):
-                batch = serial_numbers[offset:offset + 100]
-                logger.info(
-                    "OPENAPI START Query Device Real-time Telemetry Data: deviceType=%s, sns=%s",
-                    device_type,
-                    batch,
-                )
-                print(f"\n===== OPENAPI START Query Device Real-time Telemetry Data: deviceType={device_type}, sns={batch} =====")
-                telemetry_response = account.openApiDeviceTelemetryRequest(batch, device_type)
-                telemetry_json = json.dumps(telemetry_response, indent=2, sort_keys=True, default=str)
-                logger.info(
-                    "OPENAPI RESULT Query Device Real-time Telemetry Data: deviceType=%s\n%s",
-                    device_type,
-                    telemetry_json,
-                )
-                print(f"===== OPENAPI RESULT Query Device Real-time Telemetry Data: deviceType={device_type} =====")
-                print(telemetry_json)
-                telemetry_data = telemetry_response.get("data", {})
-                if isinstance(telemetry_data, dict):
-                    telemetry_count += len(telemetry_data.get("deviceData", []))
-    except Exception as error:
-        logger.exception("OPENAPI request failed")
-        print(f"OpenAPI request failed: {error}", file=sys.stderr)
+    if not isinstance(station_data, dict):
+        print("SEMS+ returned no station telemetry data.", file=sys.stderr)
         return 1
 
-    if not telemetry_count:
-        logger.warning("OPENAPI RESULT: no device telemetry returned for station %s", station_id)
-        print("The OpenAPI telemetry endpoint returned no device data.", file=sys.stderr)
-        return 1
-
-    logger.info("OPENAPI RESULT: telemetry returned for %s device(s)", telemetry_count)
-    print(f"\n===== OPENAPI telemetry returned for {telemetry_count} device(s). =====")
+    print("\n===== Normalized station data passed to Domoticz =====")
+    print(json.dumps(station_data, indent=2, sort_keys=True, default=str))
+    inverters = station_data.get("inverter", [])
+    print(f"\nSEMS+ devices returned: {len(inverters)}")
     return 0
 
 
