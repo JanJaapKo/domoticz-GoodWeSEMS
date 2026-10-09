@@ -821,11 +821,26 @@ class GoodWeSEMSPlus(GoodWe):
                 telemetry["output_voltage"] = float(v)
             except Exception:
                 pass
-        if (v := factors.get("Iac")) is not None:
-            try:
-                telemetry["output_current"] = float(v)
-            except Exception:
-                pass
+        current_values = []
+        current_keys = (
+            "PHASE-A:Iac", "PHASE-B:Iac", "PHASE-C:Iac",
+            "Iac", "iac", "Iac1", "Iac2", "Iac3", "iac1", "iac2", "iac3",
+        )
+        for key in current_keys:
+            value = factors.get(key)
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                values = value
+            else:
+                values = str(value).replace("/", ",").split(",")
+            for item in values:
+                try:
+                    current_values.append(float(str(item).strip()))
+                except (TypeError, ValueError):
+                    continue
+        if current_values:
+            telemetry["output_current"] = max(current_values)
         # MPPT inputs
         for idx in range(1, 5):
             vp = factors.get(f"MPPT-{idx}:Vpv") or factors.get(f"Vpv{idx}")
