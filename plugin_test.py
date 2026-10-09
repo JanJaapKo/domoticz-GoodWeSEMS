@@ -724,6 +724,30 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.assertEqual(telemetry["pv_input_4"], "253.4V/3.4A")
         self.assertIn("X-Signature", get.call_args.kwargs["headers"])
 
+    def test_web_telemetry_maps_single_and_three_phase_ac_current(self):
+        single_phase_payload = {"data": [{"factors": [
+            {"code": "Iac1", "data": "7.4"},
+        ]}]}
+        three_phase_payload = {"data": [{"factors": [
+            {"code": "PHASE-A:Iac", "data": "8.1"},
+            {"code": "PHASE-B:Iac", "data": "8.7"},
+            {"code": "PHASE-C:Iac", "data": "8.3"},
+        ]}]}
+
+        with patch("GoodWe.requests.get", side_effect=[
+            make_response(single_phase_payload),
+            make_response(three_phase_payload),
+        ]):
+            single_phase = self.account.getWebInverterTelemetry(
+                "station-uuid", "single-phase"
+            )
+            three_phase = self.account.getWebInverterTelemetry(
+                "station-uuid", "three-phase"
+            )
+
+        self.assertEqual(single_phase["output_current"], 7.4)
+        self.assertEqual(three_phase["output_current"], 8.7)
+
     def test_web_telemetry_preserves_unparseable_factor_values_safely(self):
         payload = {"data": [None, {"factors": [
             None,
@@ -733,6 +757,7 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             {"code": "pAc", "data": "bad-power"},
             {"code": "Vac", "data": "bad-voltage"},
             {"code": "Iac", "data": "bad-current"},
+            {"code": "PHASE-A:Iac", "data": "bad-phase-current"},
             {"code": "MPPT-1:Vpv", "data": "bad-v"},
             {"code": "MPPT-1:Ipv", "data": "bad-a"},
         ]}]}
