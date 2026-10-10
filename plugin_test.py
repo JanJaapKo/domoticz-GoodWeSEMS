@@ -390,6 +390,50 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertEqual(units[plugin.inputVoltage2Unit].sValue, "251V")
         self.assertEqual(units[plugin.inputVoltage3Unit].sValue, "252V")
         self.assertEqual(units[plugin.inputVoltage4Unit].sValue, "253V")
+        self.assertNotIn(plugin.outputVoltageBUnit, units)
+        self.assertNotIn(plugin.outputVoltageCUnit, units)
+        self.assertNotIn(plugin.outputCurrentBUnit, units)
+        self.assertNotIn(plugin.outputCurrentCUnit, units)
+
+    def test_update_devices_creates_only_reported_ac_phases(self):
+        plugin = self.plugin_module._plugin
+        station = PowerStation(stationData={
+            "info": {"powerstation_id": "station-uuid"},
+            "inverter": [{"sn": "sn_three_phase", "name": "inverter"}],
+        })
+        account = Mock()
+        account.powerStationList = {1: station}
+        account.INVERTER_STATE = GoodWe.INVERTER_STATE
+        plugin.goodWeAccount = account
+        self.plugin_module.Devices = {}
+
+        plugin.updateDevices({"inverter": [{
+            "sn": "sn_three_phase",
+            "fault_message": "",
+            "status": 1,
+            "tempperature": 36.2,
+            "d": {"fac1": 50.0},
+            "output_current": 8.1,
+            "output_current_b": 8.7,
+            "output_current_c": 8.3,
+            "output_voltage": 230.0,
+            "output_voltage_b": 231.0,
+            "output_voltage_c": 232.0,
+            "output_power": 1440.0,
+            "etotal": 12.5,
+            "pv_input_1": "250V/3A",
+            "battery": "",
+            "bms_status": "",
+            "battery_power": "",
+        }]})
+
+        units = self.plugin_module.Devices["sn_three_phase"].Units
+        self.assertEqual(units[plugin.outputCurrentUnit].sValue, "8.1")
+        self.assertEqual(units[plugin.outputVoltageUnit].sValue, "230.0")
+        self.assertEqual(units[plugin.outputCurrentBUnit].sValue, "8.7")
+        self.assertEqual(units[plugin.outputVoltageBUnit].sValue, "231.0")
+        self.assertEqual(units[plugin.outputCurrentCUnit].sValue, "8.3")
+        self.assertEqual(units[plugin.outputVoltageCUnit].sValue, "232.0")
 
 
 class GoodWeExceptionsTest(unittest.TestCase):
@@ -746,7 +790,29 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             )
 
         self.assertEqual(single_phase["output_current"], 7.4)
-        self.assertEqual(three_phase["output_current"], 8.7)
+        self.assertEqual(three_phase["output_current"], 8.1)
+        self.assertEqual(three_phase["output_current_b"], 8.7)
+        self.assertEqual(three_phase["output_current_c"], 8.3)
+
+    def test_web_telemetry_maps_phase_a_to_primary_voltage_and_current(self):
+        payload = {"data": [{"factors": [
+            {"code": "PHASE-A:Vac", "data": "230.1"},
+            {"code": "PHASE-B:Vac", "data": "231.2"},
+            {"code": "PHASE-C:Vac", "data": "232.3"},
+            {"code": "PHASE-A:Iac", "data": "8.1"},
+            {"code": "PHASE-B:Iac", "data": "8.7"},
+            {"code": "PHASE-C:Iac", "data": "8.3"},
+        ]}]}
+
+        with patch("GoodWe.requests.get", return_value=make_response(payload)):
+            telemetry = self.account.getWebInverterTelemetry("station-uuid", "serial-1")
+
+        self.assertEqual(telemetry["output_voltage"], 230.1)
+        self.assertEqual(telemetry["output_voltage_b"], 231.2)
+        self.assertEqual(telemetry["output_voltage_c"], 232.3)
+        self.assertEqual(telemetry["output_current"], 8.1)
+        self.assertEqual(telemetry["output_current_b"], 8.7)
+        self.assertEqual(telemetry["output_current_c"], 8.3)
 
     def test_web_telemetry_preserves_unparseable_factor_values_safely(self):
         payload = {"data": [None, {"factors": [
