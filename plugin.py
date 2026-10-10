@@ -671,19 +671,19 @@ def DumpHTTPResponseToLog(httpDict):
                 logging.debug("--->'" + x + "':'" + str(httpDict[x]) + "'")
 
 def UpdateDevice(Device, Unit, nValue, sValue, AlwaysUpdate=False):
-    # Make sure that the Domoticz device still exists before updating it.
-    # Avoid repetitive debug log entries for unchanged sensor values.
-    if Device in Devices:
-        device_unit = Devices[Device].Units[Unit]
-        if (device_unit.nValue != nValue) or (device_unit.sValue != sValue) or AlwaysUpdate:
-            logging.debug(
-                "Updating device '%s' from nValue='%s', sValue='%s' to nValue='%s', sValue='%s'",
-                device_unit.Name, device_unit.nValue, device_unit.sValue, nValue, sValue
-            )
-            device_unit.nValue = nValue
-            device_unit.sValue = sValue
-            device_unit.Update()
-            logging.debug("Update %s:'%s' (%s)", nValue, sValue, device_unit.Name)
+    # Make sure that the Domoticz device still exists (they can be deleted) before updating it
+    if (Device in Devices):
+        logging.debug("Updating device '"+Devices[Device].Units[Unit].Name+ "' with current sValue '"+Devices[Device].Units[Unit].sValue+"' to '" +sValue+"'")
+        if (Devices[Device].Units[Unit].nValue != nValue) or (Devices[Device].Units[Unit].sValue != sValue) or AlwaysUpdate:
+            #try:
+                Devices[Device].Units[Unit].nValue = nValue
+                Devices[Device].Units[Unit].sValue = sValue
+                Devices[Device].Units[Unit].Update()
+                
+                logging.debug("Update "+str(nValue)+":'"+str(sValue)+"' ("+Devices[Device].Units[Unit].Name+")")
+            # except:
+                # Domoticz.Error("Update of device failed: "+str(Unit)+"!")
+                # logging.error("Update of device failed: "+str(Unit)+"!")
     return
 
 # Configuration Helpers

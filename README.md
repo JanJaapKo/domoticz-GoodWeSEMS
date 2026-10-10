@@ -103,3 +103,7 @@ Error: Zonnepanelen: (Zonnepanelen) Failed to request data: Failed to call GoodW
 ```
 2026-05-14 12:15:16,321 - INFO     - GoodWe.py          - Failed to call GoodWe API (no valid token), will be refreshed
 ```
+
+
+### AC Output Current fix
+The SEMS+ web telemetry used by current GoodWe inverters reports phase current as `PHASE-A:Iac`, `PHASE-B:Iac`, and `PHASE-C:Iac`. The plugin now reads these fields as well as legacy `Iac/Iac1/Iac2/Iac3` fields and uses the highest phase current for the single Domoticz output-current device.

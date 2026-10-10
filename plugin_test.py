@@ -695,7 +695,9 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             "Fac": "50.01",
             "pAc": "4.5",
             "Vac": "241.2",
-            "Iac": "18.6",
+            "Iac1": "18.6",
+            "Iac2": "18.4",
+            "Iac3": "18.5",
             "MPPT-1:Vpv": "250.1",
             "MPPT-1:Ipv": "3.1",
             "Vpv2": "251.2",
@@ -723,6 +725,18 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.assertEqual(telemetry["pv_input_3"], "252.3V/3.3A")
         self.assertEqual(telemetry["pv_input_4"], "253.4V/3.4A")
         self.assertIn("X-Signature", get.call_args.kwargs["headers"])
+
+    def test_web_telemetry_maps_three_phase_ac_current_to_highest_phase(self):
+        payload = {"data": [{"factors": [
+            {"code": "Iac1", "data": "7.2"},
+            {"code": "Iac2", "data": "8.9"},
+            {"code": "Iac3", "data": "7.8"},
+        ]}]}
+
+        with patch("GoodWe.requests.get", return_value=make_response(payload)):
+            telemetry = self.account.getWebInverterTelemetry("station-uuid", "serial-1")
+
+        self.assertEqual(telemetry["output_current"], 8.9)
 
     def test_web_telemetry_preserves_unparseable_factor_values_safely(self):
         payload = {"data": [None, {"factors": [
@@ -1078,3 +1092,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

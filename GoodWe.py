@@ -821,11 +821,37 @@ class GoodWeSEMSPlus(GoodWe):
                 telemetry["output_voltage"] = float(v)
             except Exception:
                 pass
-        if (v := factors.get("Iac")) is not None:
-            try:
-                telemetry["output_current"] = float(v)
-            except Exception:
-                pass
+        # GoodWe SEMS+ web telemetry can expose three-phase AC current as
+        # PHASE-A:Iac / PHASE-B:Iac / PHASE-C:Iac (as used by current SEMS+),
+        # or as legacy Iac/Iac1/Iac2/Iac3 fields. Domoticz has one output-current
+        # device per inverter, so represent three-phase current by the highest
+        # active phase rather than summing the phases.
+        ac_current_values = []
+        phase_current_keys = ("PHASE-A:Iac", "PHASE-B:Iac", "PHASE-C:Iac")
+        legacy_current_keys = ("Iac", "iac", "Iac1", "Iac2", "Iac3",
+                               "iac1", "iac2", "iac3")
+
+        for key in phase_current_keys + legacy_current_keys:
+            v = factors.get(key)
+            if v is None:
+                continue
+            # Some SEMS+ variants may return a slash-separated phase string.
+            values = v if isinstance(v, (list, tuple)) else str(v).replace("/", ",").split(",")
+            for item in values:
+                try:
+                    value = float(str(item).strip())
+                except (TypeError, ValueError):
+                    continue
+                ac_current_values.append(value)
+
+        if ac_current_values:
+            telemetry["output_current"] = max(ac_current_values)
+            logging.debug(
+                "SEMS+ AC current: phase/legacy values=%s, output_current=%s A",
+                ac_current_values, telemetry["output_current"]
+            )
+        else:
+            logging.debug("SEMS+ AC current: no Iac/PHASE-*:Iac factor found")
         # MPPT inputs
         for idx in range(1, 5):
             vp = factors.get(f"MPPT-{idx}:Vpv") or factors.get(f"Vpv{idx}")
@@ -889,12 +915,23 @@ class GoodWeSEMSPlus(GoodWe):
             # Normalize fields expected by legacy code
             # plugin expects keys like 'sn','status','fault_message','tempperature','d','output_current','output_voltage','output_power','etotal','pv_input_1'
             inverter.setdefault('fault_message', '')
-            inverter.setdefault('status', device.get('status', 0))
-            if inverter['status'] not in self.INVERTER_STATE:
+            # A missing status means SEMS has not reported an operational state.
+            # Treat that as offline instead of silently presenting the inverter as
+            # waiting. An explicit/known status is preserved; legacy unknown
+            # numeric statuses still fall back to the live output power.
+            raw_status = device.get('status')
+            if raw_status is None or raw_status == '':
+                inverter['status'] = -1
+            else:
                 try:
-                    inverter['status'] = 1 if float(inverter.get('output_power', 0)) > 0 else 0
+                    inverter['status'] = int(raw_status)
                 except (TypeError, ValueError):
-                    inverter['status'] = 0
+                    inverter['status'] = raw_status
+                if inverter['status'] not in self.INVERTER_STATE:
+                    try:
+                        inverter['status'] = 1 if float(inverter.get('output_power', 0)) > 0 else 0
+                    except (TypeError, ValueError):
+                        inverter['status'] = -1
             for field in ('tempperature', 'output_current', 'output_voltage', 'output_power', 'etotal'):
                 if inverter.get(field) is None:
                     inverter[field] = 0

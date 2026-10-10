@@ -1,0 +1,121 @@
+return {
+    on = {
+        timer = {
+            'every 1 minutes' -- Haalt elke 1 minuten data op
+        }
+    },
+    logging = {
+        level = domoticz.LOG_INFO,
+        marker = 'SEMS_PLUS'
+    },
+    execute = function(domoticz, item)
+        
+        -- ==========================================
+        -- CONFIGURATIE (PAS DIT AAN JOUW GEGEVENS AN)
+        -- ==========================================
+        local semsUser     = 'user@sems'
+        local semsPassword = 'password_of_user'
+        local domoticzIdx  = 2954 -- Het Idx nummer van het virtuele apparaat
+        local inverterNo   = 0  -- 0 = eerste omvormer, 1 = tweede, etc.
+        -- ==========================================
+        -- De correcte Europese Gateway endpoints voor SEMS+
+        local baseUrl  = 'https://eu-gateway.semsportal.com'
+        local loginUrl = baseUrl .. '/web/sems/sems-user/api/v1/auth/cross-login'
+        local dataUrl  = baseUrl .. '/web/sems/sems-plant/api/web/device/centralized/page'
+
+        domoticz.log('Starten met ophalen van de gegevens via SEMS+...', domoticz.LOG_INFO)
+
+        -- 1. Wachtwoord versleutelen (MD5 -> Base64) via de Linux terminal
+        local cmdEncrypt = 'echo -n "' .. semsPassword .. '" | md5sum | cut -d" " -f1 | tr -d "\\n" | base64 | tr -d "\\n"'
+        local handleEnc = io.popen(cmdEncrypt)
+        local encryptedPassword = handleEnc:read("*a"):gsub("%s+", "")
+        handleEnc:close()
+
+        -- 2. Inloggen en Token ophalen
+        local loginPayload = domoticz.utils.toJSON({
+            account = semsUser,
+            pwd = encryptedPassword,
+            isChinese = false,
+            agreement = 1,
+            isLocal = true
+        })
+
+        -- Schone curl-aanroep voor inloggen
+        local cmdLogin = 'curl --silent --insecure --location --request POST "' .. loginUrl .. '" ' ..
+                         '--header "Content-Type: application/json" ' ..
+                         '--header "Accept: application/json, */*" ' ..
+                         '--header "token: {\\"uid\\":\\"\\",\\"timestamp\\":0,\\"token\\":\\"\\",\\"client\\":\\"semsPlusWeb\\",\\"version\\":\\"\\",\\"language\\":\\"en\\"}" ' ..
+                         '--data \'' .. loginPayload .. '\''
+                         
+        local handleLogin = io.popen(cmdLogin)
+        local loginResult = handleLogin:read("*a")
+        handleLogin:close()
+
+        -- Controleer of er een netwerkrespons is
+        if (not loginResult or loginResult == "") then
+            domoticz.log('Geen netwerkrespons ontvangen van de inlogserver.', domoticz.LOG_ERROR)
+            return
+        end
+
+        local loginJson = domoticz.utils.fromJSON(loginResult)
+
+        -- Controleer of de login succesvol is verwerkt (Code 00000)
+        if (loginJson and loginJson.code == '00000' and loginJson.data) then
+            domoticz.log('Login op de EU Gateway succesvol! Token gegenereerd.', domoticz.LOG_INFO)
+            
+            local d = loginJson.data
+            local tokenHeader = domoticz.utils.toJSON({
+                uid = d.uid,
+                timestamp = d.timestamp,
+                token = d.token,
+                client = "semsPlusWeb",
+                version = d.version or "",
+                language = d.language or "en",
+                region = d.region or ""
+            })
+
+            -- 3. Data opvragen met het verkregen token uit Stap 2
+            local dataPayload = '{"deviceTypeList":["INVERTER"],"current":1,"size":10}'
+            
+            local cmdData = 'curl --silent --insecure --location --request POST "' .. dataUrl .. '" ' ..
+                            '--header "Content-Type: application/json" ' ..
+                            '--header "Accept: application/json, */*" ' ..
+                            '--header "token: ' .. tokenHeader:gsub('"', '\\"') .. '" ' ..
+                            '--data \'' .. dataPayload .. '\''
+
+            local handleData = io.popen(cmdData)
+            local dataResult = handleData:read("*a")
+            handleData:close()
+
+            local dataJson = domoticz.utils.fromJSON(dataResult)
+
+            -- 4. Gegevens valideren en wegschrijven naar de Domoticz sensor
+            if (dataJson and dataJson.code == '00000' and dataJson.data and dataJson.data.dataList) then
+                local dataList = dataJson.data.dataList
+                
+                -- Correcte navigatie door de SEMS+ array: dataList[1] -> children[1]
+                if (dataList[1] and dataList[1].children and dataList[1].children[1]) then
+                    local dev = dataList[1].children[1]
+                    
+                    local pAc       = tonumber(dev.pAc) or 0         -- Actueel vermogen (kW)
+                    local proToday  = tonumber(dev.proToday) or 0    -- Dagopbrengst (kWh)
+                    
+                    -- Omrekenen naar Watts en Watt-uren voor Domoticz
+                    local wattActueel = math.floor(pAc * 1000)
+                    local whTotaal    = math.floor(proToday * 1000)
+                    
+                    domoticz.log('SEMS+ Data succesvol verwerkt -> Actueel: ' .. wattActueel .. ' W | Vandaag: ' .. proToday .. ' kWh', domoticz.LOG_INFO)
+                    
+                    -- Update de virtuele sensor (Formaat: ActueelVermogen;TotaalWh)
+                    domoticz.devices(domoticzIdx).updateElectricity(wattActueel, whTotaal)
+                else
+                    domoticz.log('Geen actieve installatie of omvormer gevonden in dataList structure.', domoticz.LOG_ERROR)
+                end
+            else
+                domoticz.log('Fout bij het ophalen van de installatiedata. Response: ' .. tostring(dataResult), domoticz.LOG_ERROR)
+            end
+        else
+            domoticz.log('Inloggen op SEMS+ geweigerd. Response van server: ' .. tostring(loginResult), domoticz.LOG_ERROR)
+        end
+    end
+}
