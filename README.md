@@ -89,8 +89,7 @@ Current features
 |18	|(Hardware name) - Inverter output frequency 1	|Custom Sensor              |
 |20	|(Hardware name) - Inverter output voltage phase B (SN: (your S/N))	|Voltage| Created when reported
 |21	|(Hardware name) - Inverter output voltage phase C (SN: (your S/N))	|Voltage| Created when reported
-|22	|(Hardware name) - Inverter output current phase B (SN: (your S/N))	|Current| Created when reported
-|23	|(Hardware name) - Inverter output current phase C (SN: (your S/N))	|Current| Created when reported
+|24	|(Hardware name) - Inverter output current (3-phase) (SN: (your S/N))	|Current/Ampere (3 Phase)| Created when phase B or C is reported; sValue order is A;B;C;
 
 
 There is a lot more information available trough the GoodWe API if you would like to have a specific feature added to this plugin please submit an issue as indicated in the paragraph above. 
