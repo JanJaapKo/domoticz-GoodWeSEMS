@@ -70,7 +70,7 @@ class Inverter:
     """
     A class to describe the methods and properties of a GoodWe inverter
     """
-    domoticzDevices = 20
+    domoticzDevices = 26
     inverterTemperatureUnit = 1
     inverterStateUnit = 9
     outputCurrentUnit = 2
@@ -90,6 +90,12 @@ class Inverter:
     inputAmps4Unit = 13
     outputFreq1Unit = 18
     inverterStateCommand = 19
+    outputVoltageAUnit = 20
+    outputVoltageBUnit = 21
+    outputVoltageCUnit = 22
+    outputCurrentAUnit = 23
+    outputCurrentBUnit = 24
+    outputCurrentCUnit = 25
 
     def __init__(self, inverterData):
         if not isinstance(inverterData, dict):
@@ -816,39 +822,73 @@ class GoodWeSEMSPlus(GoodWe):
                 telemetry["output_power"] = float(v) * 1000
             except Exception:
                 pass
-        if (v := factors.get("Vac")) is not None:
-            try:
-                telemetry["output_voltage"] = float(v)
-            except Exception:
-                pass
-        # GoodWe SEMS+ web telemetry can expose three-phase AC current as
-        # PHASE-A:Iac / PHASE-B:Iac / PHASE-C:Iac (as used by current SEMS+),
-        # or as legacy Iac/Iac1/Iac2/Iac3 fields. Domoticz has one output-current
-        # device per inverter, so represent three-phase current by the highest
-        # active phase rather than summing the phases.
-        ac_current_values = []
-        phase_current_keys = ("PHASE-A:Iac", "PHASE-B:Iac", "PHASE-C:Iac")
-        legacy_current_keys = ("Iac", "iac", "Iac1", "Iac2", "Iac3",
-                               "iac1", "iac2", "iac3")
-
-        for key in phase_current_keys + legacy_current_keys:
-            v = factors.get(key)
-            if v is None:
-                continue
-            # Some SEMS+ variants may return a slash-separated phase string.
-            values = v if isinstance(v, (list, tuple)) else str(v).replace("/", ",").split(",")
+        # AC phase voltage/current. Keep per-phase values when SEMS+ provides
+        # them, and retain the historical output_voltage/output_current fields
+        # as the maximum valid phase value for compatibility with older plugin code.
+        def parse_numeric_values(raw):
+            if raw is None:
+                return []
+            values = raw if isinstance(raw, (list, tuple)) else str(raw).replace("/", ",").split(",")
+            parsed = []
             for item in values:
                 try:
-                    value = float(str(item).strip())
+                    number = float(str(item).strip())
                 except (TypeError, ValueError):
                     continue
-                ac_current_values.append(value)
+                if number > 0:
+                    parsed.append(number)
+            return parsed
 
-        if ac_current_values:
-            telemetry["output_current"] = max(ac_current_values)
+        phase_voltage_keys = {
+            "a": ("PHASE-A:Vac", "Vac1", "vac1"),
+            "b": ("PHASE-B:Vac", "Vac2", "vac2"),
+            "c": ("PHASE-C:Vac", "Vac3", "vac3"),
+        }
+        all_voltage_values = []
+        for phase, keys in phase_voltage_keys.items():
+            phase_values = []
+            for key in keys:
+                phase_values.extend(parse_numeric_values(factors.get(key)))
+            if phase_values:
+                telemetry["output_voltage_" + phase] = max(phase_values)
+                all_voltage_values.extend(phase_values)
+
+        # Generic legacy voltage fields are used for the max only; do not
+        # pretend that an unlabelled Vac value belongs to a specific phase.
+        for key in ("Vac", "vac"):
+            all_voltage_values.extend(parse_numeric_values(factors.get(key)))
+        if all_voltage_values:
+            telemetry["output_voltage"] = max(all_voltage_values)
             logging.debug(
-                "SEMS+ AC current: phase/legacy values=%s, output_current=%s A",
-                ac_current_values, telemetry["output_current"]
+                "SEMS+ AC voltage: values=%s, output_voltage(max)=%s V",
+                all_voltage_values, telemetry["output_voltage"]
+            )
+        else:
+            logging.debug("SEMS+ AC voltage: no Vac/PHASE-*:Vac factor found")
+
+        phase_current_keys = {
+            "a": ("PHASE-A:Iac", "Iac1", "iac1"),
+            "b": ("PHASE-B:Iac", "Iac2", "iac2"),
+            "c": ("PHASE-C:Iac", "Iac3", "iac3"),
+        }
+        all_current_values = []
+        for phase, keys in phase_current_keys.items():
+            phase_values = []
+            for key in keys:
+                phase_values.extend(parse_numeric_values(factors.get(key)))
+            if phase_values:
+                telemetry["output_current_" + phase] = max(phase_values)
+                all_current_values.extend(phase_values)
+
+        # Generic legacy current fields contribute to the max but are not
+        # assigned to a phase because their phase is unknown.
+        for key in ("Iac", "iac"):
+            all_current_values.extend(parse_numeric_values(factors.get(key)))
+        if all_current_values:
+            telemetry["output_current"] = max(all_current_values)
+            logging.debug(
+                "SEMS+ AC current: values=%s, output_current(max)=%s A",
+                all_current_values, telemetry["output_current"]
             )
         else:
             logging.debug("SEMS+ AC current: no Iac/PHASE-*:Iac factor found")
