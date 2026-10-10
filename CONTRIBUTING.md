@@ -29,3 +29,9 @@ python -m compileall -q GoodWe.py plugin.py exceptions.py fakeDomoticz.py
 ## Pull Requests
 
 Describe the user-visible change and any compatibility implications. Include the regression scenarios covered, and confirm the local checks above pass before requesting review.
+
+## Versioning
+
+- Bump the minor version when creating a new feature branch.
+- Bump the major version when explicitly requested, or when a mandatory plugin configuration attribute is added or removed.
+- Use the patch version for other release fixes that do not require a major or minor bump.
