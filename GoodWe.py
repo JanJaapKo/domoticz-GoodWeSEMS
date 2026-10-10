@@ -70,7 +70,7 @@ class Inverter:
     """
     A class to describe the methods and properties of a GoodWe inverter
     """
-    domoticzDevices = 20
+    domoticzDevices = 24
     inverterTemperatureUnit = 1
     inverterStateUnit = 9
     outputCurrentUnit = 2
@@ -90,6 +90,10 @@ class Inverter:
     inputAmps4Unit = 13
     outputFreq1Unit = 18
     inverterStateCommand = 19
+    outputVoltageBUnit = 20
+    outputVoltageCUnit = 21
+    outputCurrentBUnit = 22
+    outputCurrentCUnit = 23
 
     def __init__(self, inverterData):
         if not isinstance(inverterData, dict):
@@ -816,31 +820,61 @@ class GoodWeSEMSPlus(GoodWe):
                 telemetry["output_power"] = float(v) * 1000
             except Exception:
                 pass
-        if (v := factors.get("Vac")) is not None:
-            try:
-                telemetry["output_voltage"] = float(v)
-            except Exception:
-                pass
-        current_values = []
-        current_keys = (
-            "PHASE-A:Iac", "PHASE-B:Iac", "PHASE-C:Iac",
-            "Iac", "iac", "Iac1", "Iac2", "Iac3", "iac1", "iac2", "iac3",
-        )
-        for key in current_keys:
-            value = factors.get(key)
-            if value is None:
-                continue
-            if isinstance(value, (list, tuple)):
-                values = value
-            else:
-                values = str(value).replace("/", ",").split(",")
+        def parse_numeric_values(raw):
+            if raw is None:
+                return []
+            values = raw if isinstance(raw, (list, tuple)) else str(raw).replace("/", ",").split(",")
+            parsed = []
             for item in values:
                 try:
-                    current_values.append(float(str(item).strip()))
+                    parsed.append(float(str(item).strip()))
                 except (TypeError, ValueError):
                     continue
-        if current_values:
-            telemetry["output_current"] = max(current_values)
+            return parsed
+
+        voltage_by_phase = {}
+        for phase, keys in {
+            "a": ("PHASE-A:Vac", "Vac1", "vac1"),
+            "b": ("PHASE-B:Vac", "Vac2", "vac2"),
+            "c": ("PHASE-C:Vac", "Vac3", "vac3"),
+        }.items():
+            values = [value for key in keys for value in parse_numeric_values(factors.get(key))]
+            if values:
+                voltage_by_phase[phase] = max(values)
+                if phase in ("b", "c"):
+                    telemetry[f"output_voltage_{phase}"] = max(values)
+
+        primary_voltage = voltage_by_phase.get("a")
+        if primary_voltage is None:
+            generic_voltage = parse_numeric_values(factors.get("Vac") or factors.get("vac"))
+            primary_voltage = max(generic_voltage) if generic_voltage else next(
+                (voltage_by_phase[phase] for phase in ("b", "c") if phase in voltage_by_phase),
+                None,
+            )
+        if primary_voltage is not None:
+            telemetry["output_voltage"] = primary_voltage
+
+        current_by_phase = {}
+        for phase, keys in {
+            "a": ("PHASE-A:Iac", "Iac1", "iac1"),
+            "b": ("PHASE-B:Iac", "Iac2", "iac2"),
+            "c": ("PHASE-C:Iac", "Iac3", "iac3"),
+        }.items():
+            values = [value for key in keys for value in parse_numeric_values(factors.get(key))]
+            if values:
+                current_by_phase[phase] = max(values)
+                if phase in ("b", "c"):
+                    telemetry[f"output_current_{phase}"] = max(values)
+
+        generic_current = parse_numeric_values(factors.get("Iac") or factors.get("iac"))
+        primary_current = current_by_phase.get("a")
+        if primary_current is None:
+            primary_current = max(generic_current) if generic_current else next(
+                (current_by_phase[phase] for phase in ("b", "c") if phase in current_by_phase),
+                None,
+            )
+        if primary_current is not None:
+            telemetry["output_current"] = primary_current
         # MPPT inputs
         for idx in range(1, 5):
             vp = factors.get(f"MPPT-{idx}:Vpv") or factors.get(f"Vpv{idx}")

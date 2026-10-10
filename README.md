@@ -70,8 +70,8 @@ Current features
 |Unit	|Description	|Type   |Remark
 |---    |---            |---    |---
 |1	|(Hardware name) - Inverter temperature (SN: (your S/N))	|LaCrosse TX3   |
-|2	|(Hardware name) - Inverter output current (SN: (your S/N))	|Current        |
-|3	|(Hardware name) - Inverter output voltage (SN: (your S/N))	|Voltage        |
+|2	|(Hardware name) - Inverter output current (SN: (your S/N))	|Current        | Phase A, or single-phase reading
+|3	|(Hardware name) - Inverter output voltage (SN: (your S/N))	|Voltage        | Phase A, or single-phase reading
 |4	|(Hardware name) - Inverter output power (SN: (your S/N))	|kWh            | default: used
 |5	|(Hardware name) - Inverter input 1 voltage (SN: (your S/N))	|Voltage    |
 |6	|(Hardware name) - Inverter input 1 Current (SN: (your S/N))	|Current    |
@@ -87,6 +87,10 @@ Current features
 |16	|(Hardware name) - Inverter input 3 power (SN: (your S/N))	|kWh            | calculated in plugin
 |17	|(Hardware name) - Inverter input 4 power (SN: (your S/N))	|kWh            | calculated in plugin
 |18	|(Hardware name) - Inverter output frequency 1	|Custom Sensor              |
+|20	|(Hardware name) - Inverter output voltage phase B (SN: (your S/N))	|Voltage| Created when reported
+|21	|(Hardware name) - Inverter output voltage phase C (SN: (your S/N))	|Voltage| Created when reported
+|22	|(Hardware name) - Inverter output current phase B (SN: (your S/N))	|Current| Created when reported
+|23	|(Hardware name) - Inverter output current phase C (SN: (your S/N))	|Current| Created when reported
 
 
 There is a lot more information available trough the GoodWe API if you would like to have a specific feature added to this plugin please submit an issue as indicated in the paragraph above. 
