@@ -124,6 +124,14 @@ class GoodWeSEMSPlugin:
         self.inputAmps4Unit = 13 + startNum
         self.outputFreq1Unit = 18 + startNum
         self.inverterStateCommand = 19 + startNum
+        # Per-phase AC telemetry; units 2/3 remain the max-current/max-voltage
+        # devices for backward compatibility.
+        self.outputVoltageAUnit = 20 + startNum
+        self.outputVoltageBUnit = 21 + startNum
+        self.outputVoltageCUnit = 22 + startNum
+        self.outputCurrentAUnit = 23 + startNum
+        self.outputCurrentBUnit = 24 + startNum
+        self.outputCurrentCUnit = 25 + startNum
         self.enabled = False
         self.powerStationId = ""
         return
@@ -256,6 +264,18 @@ class GoodWeSEMSPlugin:
                 else:
                     UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, str(inverter["output_current"]))
                 UpdateDevice(inverter["sn"], theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]))
+                # Publish phase readings only when SEMS actually supplied them.
+                # Units 2 and 3 continue to show the maximum current/voltage.
+                for field, unit in (
+                    ("output_voltage_a", theInverter.outputVoltageAUnit),
+                    ("output_voltage_b", theInverter.outputVoltageBUnit),
+                    ("output_voltage_c", theInverter.outputVoltageCUnit),
+                    ("output_current_a", theInverter.outputCurrentAUnit),
+                    ("output_current_b", theInverter.outputCurrentBUnit),
+                    ("output_current_c", theInverter.outputCurrentCUnit),
+                ):
+                    if inverter.get(field) is not None:
+                        UpdateDevice(inverter["sn"], unit, 0, str(inverter[field]))
                 outputPowerValue = str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000)
                 currentPowerValue = Devices[inverter["sn"]].Units[theInverter.outputPowerUnit].sValue
                 try:
@@ -346,11 +366,29 @@ class GoodWeSEMSPlugin:
                             Unit=(self.inverterTemperatureUnit), Type=80, Subtype=5).Create()
         #if self.outputCurrentUnit not in Devices:
         if serialNumber not in Devices or self.outputCurrentUnit not in Devices[serialNumber].Units:
-            Domoticz.Unit(Name="Inverter output current (SN: " + serialNumber + ")", DeviceID=serialNumber,
+            Domoticz.Unit(Name="Inverter output current max (SN: " + serialNumber + ")", DeviceID=serialNumber,
                             Unit=(self.outputCurrentUnit), Type=243, Subtype=23).Create()
         if serialNumber not in Devices or self.outputVoltageUnit not in Devices[serialNumber].Units:
-            Domoticz.Unit(Name="Inverter output voltage (SN: " + serialNumber + ")", DeviceID=serialNumber,
+            Domoticz.Unit(Name="Inverter output voltage max (SN: " + serialNumber + ")", DeviceID=serialNumber,
                             Unit=(self.outputVoltageUnit), Type=243, Subtype=8).Create()
+        for unit, phase in (
+            (self.outputVoltageAUnit, "A"),
+            (self.outputVoltageBUnit, "B"),
+            (self.outputVoltageCUnit, "C"),
+        ):
+            if serialNumber not in Devices or unit not in Devices[serialNumber].Units:
+                Domoticz.Unit(Name="AC output voltage phase " + phase + " (SN: " + serialNumber + ")",
+                              DeviceID=serialNumber, Unit=unit, Type=243, Subtype=8,
+                              Used=1).Create()
+        for unit, phase in (
+            (self.outputCurrentAUnit, "A"),
+            (self.outputCurrentBUnit, "B"),
+            (self.outputCurrentCUnit, "C"),
+        ):
+            if serialNumber not in Devices or unit not in Devices[serialNumber].Units:
+                Domoticz.Unit(Name="AC output current phase " + phase + " (SN: " + serialNumber + ")",
+                              DeviceID=serialNumber, Unit=unit, Type=243, Subtype=23,
+                              Used=1).Create()
         if serialNumber not in Devices or self.outputPowerUnit not in Devices[serialNumber].Units:
             Domoticz.Unit(Name="Inverter output power (SN: " + serialNumber + ")", DeviceID=serialNumber,
                             Unit=(self.outputPowerUnit), Type=243, Subtype=29,
