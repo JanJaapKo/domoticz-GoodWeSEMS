@@ -392,8 +392,7 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertEqual(units[plugin.inputVoltage4Unit].sValue, "253V")
         self.assertNotIn(plugin.outputVoltageBUnit, units)
         self.assertNotIn(plugin.outputVoltageCUnit, units)
-        self.assertNotIn(plugin.outputCurrentBUnit, units)
-        self.assertNotIn(plugin.outputCurrentCUnit, units)
+        self.assertNotIn(plugin.outputCurrent3PhaseUnit, units)
 
     def test_update_devices_creates_only_reported_ac_phases(self):
         plugin = self.plugin_module._plugin
@@ -414,6 +413,7 @@ class PluginBehaviorTest(unittest.TestCase):
             "tempperature": 36.2,
             "d": {"fac1": 50.0},
             "output_current": 8.1,
+            "output_current_a": 8.1,
             "output_current_b": 8.7,
             "output_current_c": 8.3,
             "output_voltage": 230.0,
@@ -430,10 +430,11 @@ class PluginBehaviorTest(unittest.TestCase):
         units = self.plugin_module.Devices["sn_three_phase"].Units
         self.assertEqual(units[plugin.outputCurrentUnit].sValue, "8.1")
         self.assertEqual(units[plugin.outputVoltageUnit].sValue, "230.0")
-        self.assertEqual(units[plugin.outputCurrentBUnit].sValue, "8.7")
         self.assertEqual(units[plugin.outputVoltageBUnit].sValue, "231.0")
-        self.assertEqual(units[plugin.outputCurrentCUnit].sValue, "8.3")
         self.assertEqual(units[plugin.outputVoltageCUnit].sValue, "232.0")
+        three_phase_current = units[plugin.outputCurrent3PhaseUnit]
+        self.assertEqual((three_phase_current.Type, three_phase_current.Subtype), (89, 1))
+        self.assertEqual(three_phase_current.sValue, "8.1;8.7;8.3;")
 
 
 class GoodWeExceptionsTest(unittest.TestCase):
@@ -790,7 +791,9 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             )
 
         self.assertEqual(single_phase["output_current"], 7.4)
+        self.assertEqual(single_phase["output_current_a"], 7.4)
         self.assertEqual(three_phase["output_current"], 8.1)
+        self.assertEqual(three_phase["output_current_a"], 8.1)
         self.assertEqual(three_phase["output_current_b"], 8.7)
         self.assertEqual(three_phase["output_current_c"], 8.3)
 

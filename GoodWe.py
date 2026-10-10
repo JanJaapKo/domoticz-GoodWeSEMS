@@ -70,7 +70,7 @@ class Inverter:
     """
     A class to describe the methods and properties of a GoodWe inverter
     """
-    domoticzDevices = 24
+    domoticzDevices = 25
     inverterTemperatureUnit = 1
     inverterStateUnit = 9
     outputCurrentUnit = 2
@@ -92,8 +92,7 @@ class Inverter:
     inverterStateCommand = 19
     outputVoltageBUnit = 20
     outputVoltageCUnit = 21
-    outputCurrentBUnit = 22
-    outputCurrentCUnit = 23
+    outputCurrent3PhaseUnit = 24
 
     def __init__(self, inverterData):
         if not isinstance(inverterData, dict):
@@ -863,16 +862,15 @@ class GoodWeSEMSPlus(GoodWe):
             values = [value for key in keys for value in parse_numeric_values(factors.get(key))]
             if values:
                 current_by_phase[phase] = max(values)
-                if phase in ("b", "c"):
+                if phase == "a":
+                    telemetry["output_current_a"] = max(values)
+                else:
                     telemetry[f"output_current_{phase}"] = max(values)
 
         generic_current = parse_numeric_values(factors.get("Iac") or factors.get("iac"))
         primary_current = current_by_phase.get("a")
         if primary_current is None:
-            primary_current = max(generic_current) if generic_current else next(
-                (current_by_phase[phase] for phase in ("b", "c") if phase in current_by_phase),
-                None,
-            )
+            primary_current = max(generic_current) if generic_current else None
         if primary_current is not None:
             telemetry["output_current"] = primary_current
         # MPPT inputs
