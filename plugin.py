@@ -232,24 +232,47 @@ class GoodWeSEMSPlugin:
                 if len(inverter['fault_message']) > 0:
                     Domoticz.Log("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
                     logging.info("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
-                Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
-                logging.info("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
-                UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, inverter["status"]+1, str((inverter["status"]+2)*10), AlwaysUpdate=True)
-                #Devices[inverter["sn"]].Unit[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
+                # Publish/log the inverter state only when it actually changes.
+                stateUnit = Devices[inverter["sn"]].Units[theInverter.inverterStateUnit]
+                stateNValue = inverter["status"] + 1
+                stateSValue = str((inverter["status"] + 2) * 10)
+                stateChanged = stateUnit.nValue != stateNValue or stateUnit.sValue != stateSValue
+                if stateChanged:
+                    stateMessage = "Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'"
+                    Domoticz.Log(stateMessage)
+                    logging.info(stateMessage)
+                UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, stateNValue, stateSValue)
                 if self.goodWeAccount.INVERTER_STATE[inverter["status"]] == 'generating':
                     logging.debug("inverter generating, log temp")
                     UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
                     UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
 
-                UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, str(inverter["output_current"]), AlwaysUpdate=True)
-                UpdateDevice(inverter["sn"], theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]), AlwaysUpdate=True)
+                # When offline, publish zero once, then avoid adding the same
+                # zero reading to Domoticz on every polling cycle.
+                currentUnit = Devices[inverter["sn"]].Units[theInverter.outputCurrentUnit]
+                if inverter["status"] == -1:
+                    if str(currentUnit.sValue) not in ("0", "0.0", "0.00"):
+                        UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, "0")
+                else:
+                    UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, str(inverter["output_current"]))
+                UpdateDevice(inverter["sn"], theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]))
                 outputPowerValue = str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000)
                 currentPowerValue = Devices[inverter["sn"]].Units[theInverter.outputPowerUnit].sValue
                 try:
                     currentEnergyCounter = float(currentPowerValue.split(";")[1])
                 except (IndexError, ValueError):
                     currentEnergyCounter = 0
-                if inverter["etotal"] <= 0 and currentEnergyCounter > 0:
+                if inverter["status"] == -1:
+                    # Reset power to zero only once while offline; preserve energy.
+                    try:
+                        currentPower, currentEnergy = currentPowerValue.split(";", 1)
+                        alreadyZero = float(currentPower) == 0.0
+                    except (AttributeError, ValueError):
+                        currentEnergy = str(inverter["etotal"] * 1000)
+                        alreadyZero = False
+                    if not alreadyZero:
+                        UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, "0;" + currentEnergy)
+                elif inverter["etotal"] <= 0 and currentEnergyCounter > 0:
                     logging.warning(
                         "Skipping suspicious output power update for inverter '%s': current value '%s', new value '%s'",
                         inverter["sn"],
@@ -257,23 +280,42 @@ class GoodWeSEMSPlugin:
                         outputPowerValue,
                     )
                 else:
-                    UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue)
                 inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
                 inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1]) #calculate the power based on P = I * V in Watt
-                UpdateDevice(inverter["sn"], theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
-                UpdateDevice(inverter["sn"], theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
+                if inputPower > 0:
+                    UpdateDevice(inverter["sn"], theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"], theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
 
-                newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower1Unit, inputPower)
-                UpdateDevice(inverter["sn"],theInverter.inputPower1Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower1Unit, inputPower)
+                    UpdateDevice(inverter["sn"],theInverter.inputPower1Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                else:
+                    logging.debug("Skipping MPP1 update because input power is %.1f W", inputPower)
 
                 if "pv_input_2" in inverter:
                     logging.debug("Second string found")
-                    inputVoltage,inputAmps = inverter["pv_input_2"].split('/')
-                    UpdateDevice(inverter["sn"],theInverter.inputVoltage2Unit, 0, inputVoltage, AlwaysUpdate=True)
-                    UpdateDevice(inverter["sn"],theInverter.inputAmps2Unit, 0, inputAmps, AlwaysUpdate=True)
-                    inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
-                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower2Unit, inputPower)
-                    UpdateDevice(inverter["sn"],theInverter.inputPower2Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    if inverter["status"] == -1:
+                        # When SEMS reports the inverter offline, publish one zero
+                        # reading so the chart drops to zero, then leave the values
+                        # untouched until the inverter comes back online. Keep the
+                        # accumulated energy counter intact.
+                        currentPowerValue = Devices[inverter["sn"]].Units[theInverter.inputPower2Unit].sValue
+                        try:
+                            _, currentCount = currentPowerValue.split(";")
+                            currentCount = float(currentCount)
+                        except (AttributeError, ValueError):
+                            currentCount = 0.0
+                        UpdateDevice(inverter["sn"], theInverter.inputVoltage2Unit, 0, "0V")
+                        UpdateDevice(inverter["sn"], theInverter.inputAmps2Unit, 0, "0A")
+                        UpdateDevice(inverter["sn"], theInverter.inputPower2Unit, 0, "0.0;{:10.2f}".format(currentCount))
+                        logging.debug("MPP2 reset to zero because inverter is offline; further offline readings are not logged")
+                    else:
+                        inputVoltage,inputAmps = inverter["pv_input_2"].split('/')
+                        UpdateDevice(inverter["sn"],theInverter.inputVoltage2Unit, 0, inputVoltage, AlwaysUpdate=True)
+                        UpdateDevice(inverter["sn"],theInverter.inputAmps2Unit, 0, inputAmps, AlwaysUpdate=True)
+                        inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
+                        newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower2Unit, inputPower)
+                        UpdateDevice(inverter["sn"],theInverter.inputPower2Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
                 if "pv_input_3" in inverter:
                     logging.debug("Third string found")
                     inputVoltage,inputAmps = inverter["pv_input_3"].split('/')
@@ -379,7 +421,7 @@ class GoodWeSEMSPlugin:
         if serialNumber not in Devices or self.inverterStateCommand not in Devices[serialNumber].Units:
 
             Options = {"LevelActions": "|||",
-                  "LevelNames": "|Reboot|Waiting/off|N/A|Restart",
+                  "LevelNames": "|Reboot|Offline|N/A|Restart",
                   "LevelOffHidden": "true",
                   "SelectorStyle": "1"}
             Domoticz.Unit(Name="Inverter state control (SN: " + serialNumber + ")",
@@ -552,6 +594,12 @@ def calculateNewEnergy(Device, Unit, inputPower):
     elapsedTime = datetime.now() - lastUpdateDT
     logging.debug("Test power, previousPower: {}, last update: {:%Y-%m-%d %H:%M}, elapsedTime: {}, elapsedSeconds: {:6.2f}".format(previousPower, lastUpdateDT, elapsedTime, elapsedTime.total_seconds()))
     
+    # Do not integrate daytime power over a long gap (for example overnight).
+    # The next positive reading starts a fresh measurement interval.
+    if elapsedTime.total_seconds() > 7200:
+        logging.debug("Resetting energy interval after %.2f hours without an input update", elapsedTime.total_seconds() / 3600)
+        return float(currentCount)
+
     #average current and previous power (Watt) and multiply by elapsed time (hour) to get Watt hour
     previousPower = str(previousPower).replace("w","").replace("W","")
     newCount = round(((float(previousPower) + inputPower ) / 2) * elapsedTime.total_seconds()/3600,2)
@@ -623,19 +671,19 @@ def DumpHTTPResponseToLog(httpDict):
                 logging.debug("--->'" + x + "':'" + str(httpDict[x]) + "'")
 
 def UpdateDevice(Device, Unit, nValue, sValue, AlwaysUpdate=False):
-    # Make sure that the Domoticz device still exists (they can be deleted) before updating it
-    if (Device in Devices):
-        logging.debug("Updating device '"+Devices[Device].Units[Unit].Name+ "' with current sValue '"+Devices[Device].Units[Unit].sValue+"' to '" +sValue+"'")
-        if (Devices[Device].Units[Unit].nValue != nValue) or (Devices[Device].Units[Unit].sValue != sValue) or AlwaysUpdate:
-            #try:
-                Devices[Device].Units[Unit].nValue = nValue
-                Devices[Device].Units[Unit].sValue = sValue
-                Devices[Device].Units[Unit].Update()
-                
-                logging.debug("Update "+str(nValue)+":'"+str(sValue)+"' ("+Devices[Device].Units[Unit].Name+")")
-            # except:
-                # Domoticz.Error("Update of device failed: "+str(Unit)+"!")
-                # logging.error("Update of device failed: "+str(Unit)+"!")
+    # Make sure that the Domoticz device still exists before updating it.
+    # Avoid repetitive debug log entries for unchanged sensor values.
+    if Device in Devices:
+        device_unit = Devices[Device].Units[Unit]
+        if (device_unit.nValue != nValue) or (device_unit.sValue != sValue) or AlwaysUpdate:
+            logging.debug(
+                "Updating device '%s' from nValue='%s', sValue='%s' to nValue='%s', sValue='%s'",
+                device_unit.Name, device_unit.nValue, device_unit.sValue, nValue, sValue
+            )
+            device_unit.nValue = nValue
+            device_unit.sValue = sValue
+            device_unit.Update()
+            logging.debug("Update %s:'%s' (%s)", nValue, sValue, device_unit.Name)
     return
 
 # Configuration Helpers
