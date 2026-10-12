@@ -193,6 +193,16 @@ def test_update_devices_skips_zero_counter_reset(plugin_module):
     output_unit = FakeUnit("Output Power", serial_number, plugin_module._plugin.outputPowerUnit)
     output_unit.sValue = "588.0;9066300.0"
     plugin_module.Devices[serial_number].Units[output_unit.Unit] = output_unit
+    unchanged_units = []
+    for name, unit_number, value in (
+        ("Output Current", plugin_module._plugin.outputCurrentUnit, "5.2"),
+        ("Output Voltage", plugin_module._plugin.outputVoltageUnit, "225.7"),
+        ("Inverter State", plugin_module._plugin.inverterStateUnit, "30"),
+    ):
+        unit = FakeUnit(name, serial_number, unit_number)
+        unit.sValue = value
+        plugin_module.Devices[serial_number].Units[unit_number] = unit
+        unchanged_units.append((unit, value))
 
     inverter_data = {
         "sn": serial_number,
@@ -215,6 +225,9 @@ def test_update_devices_skips_zero_counter_reset(plugin_module):
     plugin_module._plugin.updateDevices({"inverter": [inverter_data]})
     assert output_unit.sValue == "588.0;9066300.0", "A zero total must not reset an existing counter"
     assert output_unit.update_called == 0, "A suspicious zero counter update must be skipped"
+    for unit, value in unchanged_units:
+        assert unit.sValue == value, f"{unit.Name} must keep its previous value"
+        assert unit.update_called == 0, f"{unit.Name} must not be updated for an empty record"
 
     inverter_data["etotal"] = 9066.4
     plugin_module._plugin.updateDevices({"inverter": [inverter_data]})

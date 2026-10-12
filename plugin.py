@@ -17,12 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.8.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.8.1" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
         <p>This version will repalce the old one per MAy 2026</p>
-        <p>Version: 5.8.0</p>
+        <p>Version: 5.8.1</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -232,6 +232,21 @@ class GoodWeSEMSPlugin:
                 
                 theInverter = theStation.inverters[inverter["sn"]]
 
+                try:
+                    currentEnergyCounter = float(
+                        Devices[inverter["sn"]].Units[theInverter.outputPowerUnit].sValue.split(";")[1]
+                    )
+                except (KeyError, IndexError, ValueError, AttributeError):
+                    currentEnergyCounter = 0
+                if inverter["etotal"] <= 0 and currentEnergyCounter > 0:
+                    logging.warning(
+                        "Skipping update for inverter '%s': empty SEMS+ record (etotal %s, previous energy counter %s)",
+                        inverter["sn"],
+                        inverter["etotal"],
+                        currentEnergyCounter,
+                    )
+                    continue
+
                 if len(inverter['fault_message']) > 0:
                     Domoticz.Log("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
                     logging.info("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
@@ -269,20 +284,7 @@ class GoodWeSEMSPlugin:
                         AlwaysUpdate=True,
                     )
                 outputPowerValue = str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000)
-                currentPowerValue = Devices[inverter["sn"]].Units[theInverter.outputPowerUnit].sValue
-                try:
-                    currentEnergyCounter = float(currentPowerValue.split(";")[1])
-                except (IndexError, ValueError):
-                    currentEnergyCounter = 0
-                if inverter["etotal"] <= 0 and currentEnergyCounter > 0:
-                    logging.warning(
-                        "Skipping suspicious output power update for inverter '%s': current value '%s', new value '%s'",
-                        inverter["sn"],
-                        currentPowerValue,
-                        outputPowerValue,
-                    )
-                else:
-                    UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue, AlwaysUpdate=True)
+                UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue, AlwaysUpdate=True)
                 inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
                 inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1]) #calculate the power based on P = I * V in Watt
                 UpdateDevice(inverter["sn"], theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
