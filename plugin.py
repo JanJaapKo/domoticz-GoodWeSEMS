@@ -17,12 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.8.1" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.8.2" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
         <p>This version will repalce the old one per MAy 2026</p>
-        <p>Version: 5.8.1</p>
+        <p>Version: 5.8.2</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -254,9 +254,10 @@ class GoodWeSEMSPlugin:
                 logging.info("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
                 UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, inverter["status"]+1, str((inverter["status"]+2)*10), AlwaysUpdate=True)
                 #Devices[inverter["sn"]].Unit[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
+                if inverter.get("tempperature") is not None:
+                    UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
                 if self.goodWeAccount.INVERTER_STATE[inverter["status"]] == 'generating':
                     logging.debug("inverter generating, log temp")
-                    UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
                     UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
 
                 UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, str(inverter["output_current"]), AlwaysUpdate=True)
