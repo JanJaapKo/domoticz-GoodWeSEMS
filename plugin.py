@@ -254,7 +254,8 @@ class GoodWeSEMSPlugin:
                 logging.info("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
                 UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, inverter["status"]+1, str((inverter["status"]+2)*10), AlwaysUpdate=True)
                 #Devices[inverter["sn"]].Unit[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
-                UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
+                if inverter.get("tempperature") is not None:
+                    UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
                 if self.goodWeAccount.INVERTER_STATE[inverter["status"]] == 'generating':
                     logging.debug("inverter generating, log temp")
                     UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))

@@ -394,6 +394,44 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertNotIn(plugin.outputVoltageCUnit, units)
         self.assertNotIn(plugin.outputCurrent3PhaseUnit, units)
 
+    def test_update_devices_logs_temperature_for_offline_inverter(self):
+        plugin = self.plugin_module._plugin
+        station = PowerStation(stationData={
+            "info": {"powerstation_id": "station-uuid"},
+            "inverter": [{"sn": "sn_offline", "name": "inverter"}],
+        })
+        account = Mock()
+        account.powerStationList = {1: station}
+        account.INVERTER_STATE = {0: "offline"}
+        plugin.goodWeAccount = account
+        self.plugin_module.Devices = {}
+        plugin.createDevices("sn_offline")
+
+        temperature_unit = self.plugin_module.Devices["sn_offline"].Units[
+            plugin.inverterTemperatureUnit
+        ]
+        temperature_unit.sValue = "21.0"
+        inverter_data = {
+            "sn": "sn_offline",
+            "fault_message": "",
+            "status": 0,
+            "output_current": 0,
+            "output_voltage": 0,
+            "output_power": 0,
+            "etotal": 1,
+            "pv_input_1": "0V/0A",
+            "battery": "",
+            "bms_status": "",
+            "battery_power": "",
+        }
+
+        plugin.updateDevices({"inverter": [inverter_data]})
+        self.assertEqual(temperature_unit.sValue, "21.0")
+
+        inverter_data["tempperature"] = 24.7
+        plugin.updateDevices({"inverter": [inverter_data]})
+        self.assertEqual(temperature_unit.sValue, "24.7")
+
     def test_update_devices_creates_only_reported_ac_phases(self):
         plugin = self.plugin_module._plugin
         station = PowerStation(stationData={
