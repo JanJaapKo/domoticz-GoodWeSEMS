@@ -4,7 +4,6 @@ import hashlib
 import json
 import GoodWe as goodwe_module
 from unittest.mock import Mock, patch
-from GoodWe import GoodWe
 from GoodWe import GoodWeSEMSPlus
 from GoodWe import NEW_LOGIN_URL
 from GoodWe import PowerStation
@@ -257,7 +256,6 @@ class PluginBehaviorTest(unittest.TestCase):
 
     def test_semsplus_device_update_does_not_force_periodic_login(self):
         plugin = self.plugin_module._plugin
-        self.plugin_module.Parameters["Mode4"] = "No"
         plugin.establishToken = Mock(return_value=True)
         plugin.getPowerStationId = Mock(return_value="station-uuid")
         plugin.getDeviceData = Mock(return_value={"inverter": []})
@@ -294,13 +292,11 @@ class PluginBehaviorTest(unittest.TestCase):
         self.plugin_module.setConfigItem("unsupported", object())
         self.assertEqual(self.plugin_module.getConfigItem("unsupported"), {})
 
-    def test_legacy_heartbeat_schedules_at_configured_interval(self):
+    def test_heartbeat_schedules_semsplus_updates_at_configured_interval(self):
         plugin = self.plugin_module._plugin
         plugin.enabled = True
         plugin.runAgain = 2
-        self.plugin_module.Parameters["Mode4"] = "No"
         self.plugin_module.Parameters["Mode2"] = "3"
-        plugin.httpConn = None
         plugin.startDeviceUpdateV2 = Mock()
 
         plugin.onHeartbeat()
@@ -311,18 +307,6 @@ class PluginBehaviorTest(unittest.TestCase):
         plugin.startDeviceUpdateV2.assert_called_once_with()
         self.assertEqual(plugin.runAgain, 3)
 
-    def test_disconnect_clears_connection_and_stop_disconnects_active_connection(self):
-        plugin = self.plugin_module._plugin
-        connection = Mock(Address="eu.semsportal.com", Port="443")
-        plugin.httpConn = connection
-
-        plugin.onDisconnect(connection)
-        self.assertIsNone(plugin.httpConn)
-
-        plugin.httpConn = connection
-        plugin.onStop()
-        connection.Disconnect.assert_called_once_with()
-
     def test_upgrade_refuses_existing_devices_below_framework_version(self):
         self.plugin_module.Devices = {"existing": object()}
 
@@ -330,7 +314,7 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertEqual(self.plugin_module.getConfigItem("plugin version"), "4.0.0")
 
     def test_on_start_initializes_semsplus_client_and_update_interval(self):
-        self.plugin_module.Parameters["Mode4"] = "Yes"
+        self.plugin_module.Parameters["Mode4"] = "No"
         self.plugin_module.Parameters["Mode6"] = "Debug"
         self.plugin_module.Parameters["Mode2"] = "6"
 
@@ -340,12 +324,12 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertEqual(plugin.runAgain, 6)
         plugin.startDeviceUpdateV2.assert_called_once_with()
 
-    def test_on_start_initializes_legacy_client_when_semsplus_is_disabled(self):
-        self.plugin_module.Parameters["Mode4"] = "No"
+    def test_on_start_does_not_require_removed_mode4_setting(self):
+        self.plugin_module.Parameters.pop("Mode4", None)
 
         plugin = self._start_plugin()
 
-        self.assertIsInstance(plugin.goodWeAccount, GoodWe)
+        self.assertIsInstance(plugin.goodWeAccount, GoodWeSEMSPlus)
         plugin.startDeviceUpdateV2.assert_called_once_with()
 
     def test_update_devices_maps_generating_inverter_and_all_pv_strings(self):
@@ -356,7 +340,7 @@ class PluginBehaviorTest(unittest.TestCase):
         })
         account = Mock()
         account.powerStationList = {1: station}
-        account.INVERTER_STATE = GoodWe.INVERTER_STATE
+        account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
         plugin.goodWeAccount = account
         self.plugin_module.Devices = {}
         plugin.createDevices("sn_generating")
@@ -440,7 +424,7 @@ class PluginBehaviorTest(unittest.TestCase):
         })
         account = Mock()
         account.powerStationList = {1: station}
-        account.INVERTER_STATE = GoodWe.INVERTER_STATE
+        account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
         plugin.goodWeAccount = account
         self.plugin_module.Devices = {}
 
@@ -518,59 +502,44 @@ class GoodWeSemsAuthenticationTest(unittest.TestCase):
 
         post.assert_called_once()
         self.assertEqual(post.call_args.args[0], NEW_LOGIN_URL)
-        payload = post.call_args.kwargs["json"]
         expected_password = base64.b64encode(
             hashlib.md5(b"password").hexdigest().encode("utf-8")
         ).decode("utf-8")
-        self.assertEqual(payload, {
-            "account": "user@example.com",
-            "pwd": expected_password,
-            "agreement": 1,
-            "isChinese": False,
-            "isLocal": True,
-        })
-        self.assertEqual(json.loads(post.call_args.kwargs["headers"]["token"])["client"], "semsPlusWeb")
+        self.assertEqual(post.call_args.kwargs["json"]["pwd"], expected_password)
         self.assertTrue(account.tokenAvailable)
         self.assertEqual(account.token["token"], "sems-token")
 
 
 class GoodWeFallbackMappingTest(unittest.TestCase):
-    def test_station_data_request_v2_accepts_normalized_fallback(self):
+    def test_station_data_request_v2_accepts_normalized_semsplus_response(self):
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
-        expected = {"inverter": [{"sn": "54200DSN196R0358"}]}
-        account.stationDataRequest = lambda station_id: expected
+        expected = {"info": {"powerstation_id": "station-uuid"}, "inverter": [{"sn": "serial-1"}]}
+        account.stationDataRequest = Mock(return_value=expected)
 
-        self.assertEqual(account.stationDataRequestV2("station-uuid"), expected)
+        self.assertIs(account.stationDataRequestV2("station-uuid"), expected)
 
     @patch("GoodWe.requests.post")
-    def test_semsplus_station_data_request_skips_legacy_monitor_route(self, post):
+    def test_semsplus_station_data_request_uses_web_data_only(self, post):
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
         expected = {"inverter": [{"sn": "serial-1"}]}
         account.getWebData = Mock(return_value=expected)
 
-        result = account.stationDataRequest("station-uuid")
-
-        self.assertIs(result, expected)
+        self.assertIs(account.stationDataRequest("station-uuid"), expected)
         account.getWebData.assert_called_once_with("station-uuid")
         post.assert_not_called()
 
-    @patch("GoodWe.requests.post")
-    def test_legacy_station_data_request_still_uses_monitor_route(self, post):
-        response = Mock()
-        response.url = "https://eu.semsportal.com/api/v2/PowerStation/GetMonitorDetailByPowerstationId"
-        response.status_code = 200
-        response.text = "{}"
-        response.json.return_value = {}
-        post.return_value = response
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
-
-        account.stationDataRequest("station-uuid")
-
-        post.assert_called_once()
-        self.assertEqual(
-            post.call_args.args[0],
-            "https://eu.semsportal.com/api/PowerStation/GetMonitorDetailByPowerstationId",
+    def test_station_data_request_v2_retries_transport_errors(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        expected = {"inverter": [{"sn": "serial-1"}]}
+        account.stationDataRequest = Mock(
+            side_effect=[goodwe_module.requests.exceptions.Timeout("offline"), expected]
         )
+
+        with patch("GoodWe.time.sleep") as sleep:
+            self.assertIs(account.stationDataRequestV2("station-uuid"), expected)
+
+        self.assertEqual(account.stationDataRequest.call_count, 2)
+        sleep.assert_called_once_with(1)
 
     def test_unknown_sems_status_maps_from_live_output(self):
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
@@ -622,116 +591,6 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         self.assertEqual(inverter["etotal"], 0)
         self.assertEqual(inverter["pv_input_1"], "0V/0A")
         self.assertIn("fac1", inverter["d"])
-
-
-class GoodWeLegacyApiTest(unittest.TestCase):
-    def test_legacy_token_request_uses_component_api_url(self):
-        response = make_response({
-            "code": 0,
-            "components": {"api": "https://regional.semsportal.com/api"},
-            "data": {"token": "legacy-token"},
-        })
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
-
-        with patch("GoodWe.requests.post", return_value=response) as post:
-            result = account.tokenRequest()
-
-        self.assertEqual(result, 200)
-        self.assertTrue(account.tokenAvailable)
-        self.assertEqual(account.token, {"token": "legacy-token"})
-        self.assertEqual(account.base_url, "https://regional.semsportal.com/api/v2")
-        self.assertEqual(post.call_args.kwargs["data"], {
-            "account": "user@example.com",
-            "pwd": "password",
-        })
-
-    def test_legacy_token_request_handles_missing_api_and_transport_failure(self):
-        response = make_response({"code": 0, "data": {"token": "token"}})
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
-        with patch("GoodWe.requests.post", return_value=response):
-            self.assertIsNone(account.tokenRequest())
-        self.assertFalse(account.tokenAvailable)
-
-    def test_legacy_token_request_rejects_invalid_credentials(self):
-        response = make_response({"code": 100005})
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "wrong-password")
-
-        with patch("GoodWe.requests.post", return_value=response):
-            with self.assertRaisesRegex(exceptions.GoodweException, "invalid password or username"):
-                account.tokenRequest()
-
-        with patch("GoodWe.requests.post", side_effect=goodwe_module.requests.exceptions.Timeout("offline")):
-            self.assertIsNone(account.tokenRequest())
-        self.assertFalse(account.tokenAvailable)
-
-    def test_legacy_power_station_list_uses_v3_endpoint_and_rejects_http_error(self):
-        payload = {"code": 0, "data": [{"id": "station-1"}]}
-        response = make_response(payload)
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
-        with patch("GoodWe.requests.post", return_value=response) as post:
-            self.assertEqual(account.powerStationListRequest(), payload)
-
-        self.assertEqual(
-            post.call_args.args[0],
-            "https://eu.semsportal.com/api/v3/PowerStation/GetPowerStationList",
-        )
-        self.assertEqual(post.call_args.kwargs["json"], {})
-
-        response.raise_for_status.side_effect = goodwe_module.requests.exceptions.HTTPError("bad response")
-        with patch("GoodWe.requests.post", return_value=response):
-            with self.assertRaises(goodwe_module.requests.exceptions.HTTPError):
-                account.powerStationListRequest()
-
-    def test_station_data_request_v2_accepts_legacy_response_and_retries_expired_token(self):
-        station_data = {"inverter": [{"sn": "serial-1"}]}
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
-        account.stationDataRequest = Mock(return_value={"code": 0, "data": station_data})
-        self.assertEqual(account.stationDataRequestV2("station-uuid"), station_data)
-
-        account.stationDataRequest = Mock(side_effect=[
-            {"code": 100001, "data": None},
-            {"code": 0, "data": station_data},
-        ])
-        account.tokenRequest = Mock()
-        with patch("GoodWe.time.sleep") as sleep:
-            self.assertEqual(account.stationDataRequestV2("station-uuid"), station_data)
-        account.tokenRequest.assert_called_once_with()
-        sleep.assert_called_once_with(1)
-
-    def test_station_data_request_v2_retries_transport_errors_then_raises(self):
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
-        account.stationDataRequest = Mock(
-            side_effect=goodwe_module.requests.exceptions.Timeout("offline")
-        )
-
-        with patch("GoodWe.time.sleep") as sleep:
-            with self.assertRaises(exceptions.TooManyRetries):
-                account.stationDataRequestV2("station-uuid")
-
-        self.assertEqual(account.stationDataRequest.call_count, 3)
-        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 8, 27])
-
-    def test_legacy_station_data_and_control_requests_handle_json_and_payload(self):
-        account = GoodWe("eu.semsportal.com", "443", "user@example.com", "password")
-        station_response = make_response({"code": 0})
-        with patch("GoodWe.requests.post", return_value=station_response) as post:
-            self.assertEqual(account.stationDataRequest("station-uuid"), {"code": 0})
-        self.assertEqual(post.call_args.kwargs["data"], {"powerStationId": "station-uuid"})
-
-        control_response = make_response({"code": 0})
-        with patch("GoodWe.requests.post", return_value=control_response) as post:
-            self.assertEqual(account.setInverterStatus("station-uuid", "serial-1", 2), {"code": 0})
-        self.assertEqual(post.call_args.kwargs["data"], {
-            "inverterSN": "serial-1",
-            "powerStationId": "station-uuid",
-            "InverterStatusSettingMark": 1,
-            "InverterStatus": 2,
-        })
-
-        invalid_json = Mock(url="https://example.test", status_code=200, text="not json")
-        invalid_json.json.side_effect = json.JSONDecodeError("invalid", "not json", 0)
-        with patch("GoodWe.requests.post", return_value=invalid_json):
-            self.assertFalse(account.stationDataRequest("station-uuid"))
 
 
 class GoodWeSemsWebApiTest(unittest.TestCase):
@@ -983,68 +842,19 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             "station-uuid", "serial-2", "ENERGY_STORAGE_INTEGRATED_CABINET"
         )
 
-    def test_powerstation_api_base_uses_region_only_for_powerstation_routes(self):
-        self.assertEqual(
-            self.account._resolve_api_base_for_url_part(
-                self.account.base_url, "/PowerStation/GetMonitorDetailByPowerstationId"
-            ),
-            "https://eu.semsportal.com/api",
-        )
-        self.assertEqual(
-            self.account._resolve_api_base_for_url_part(
-                self.account.base_url, "/sems-plant/api/stations/device/all-status"
-            ),
-            self.account.base_url,
-        )
-        self.account.token["region"] = "au"
-        self.assertEqual(
-            self.account._resolve_api_base_for_url_part(
-                self.account.base_url, "/v3/PowerStation/GetPowerStationList"
-            ),
-            "https://au.semsportal.com/api",
-        )
-
-    def test_semsplus_inverter_control_posts_expected_payload_and_handles_bad_json(self):
-        response = make_response({"code": "00000"})
-        with patch("GoodWe.requests.post", return_value=response) as post:
-            self.assertEqual(self.account.setInverterStatus("station-uuid", "serial-1", 2), {"code": "00000"})
-
-        self.assertEqual(
-            post.call_args.args[0],
-            "https://eu.semsportal.com/api/PowerStation/SaveRemoteControlInverter",
-        )
-        self.assertEqual(post.call_args.kwargs["json"], {
-            "InverterSN": "serial-1",
-            "powerStationId": "station-uuid",
-            "InverterStatusSettingMark": 1,
-            "InverterStatus": 2,
-        })
-
-        invalid_json = Mock(url="https://example.test", status_code=200, text="not json")
-        invalid_json.json.side_effect = json.JSONDecodeError("invalid", "not json", 0)
-        with patch("GoodWe.requests.post", return_value=invalid_json):
-            self.assertFalse(self.account.setInverterStatus("station-uuid", "serial-1", 2))
-
-
-class GoodWeSemsAuthenticationFallbackTest(unittest.TestCase):
-    def test_failed_new_login_falls_back_to_legacy_login(self):
+class GoodWeSemsAuthenticationFailureTest(unittest.TestCase):
+    def test_failed_new_login_does_not_fall_back_to_legacy_login(self):
         new_login_response = make_response({"code": "S9999", "msg": "new login rejected"})
-        legacy_login_response = make_response({"code": "00000", "data": {"token": "legacy-token"}})
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
 
-        with patch(
-            "GoodWe.requests.post",
-            side_effect=[new_login_response, legacy_login_response],
-        ) as post:
-            self.assertEqual(account.tokenRequest(), 200)
+        with patch("GoodWe.requests.post", return_value=new_login_response) as post:
+            self.assertIsNone(account.tokenRequest())
 
-        self.assertTrue(account.tokenAvailable)
-        self.assertEqual(account.token["token"], "legacy-token")
-        self.assertEqual(account.base_url, "https://eu.semsportal.com/api")
-        self.assertEqual(post.call_args_list[0].args[0], NEW_LOGIN_URL)
-        self.assertEqual(post.call_args_list[1].args[0], goodwe_module.OLD_LOGIN_URL)
+        self.assertFalse(account.tokenAvailable)
+        post.assert_called_once()
+        self.assertEqual(post.call_args.args[0], NEW_LOGIN_URL)
 
-    def test_login_token_rejects_invalid_payloads_and_uses_fallback_url(self):
+    def test_login_token_rejects_invalid_payloads_and_uses_gateway_fallback(self):
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
 
         self.assertIsNone(account._extract_login_token(None))

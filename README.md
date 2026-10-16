@@ -7,9 +7,9 @@ Most recently a lot of inspiration is taken from [TimSoethout
 goodwe-sems-home-assistant](https://github.com/TimSoethout/goodwe-sems-home-assistant)
 
 
-Important update note (v5)
+Important update note (v6)
 ----------------------
-Per version 5 (May 2026), I've updated the plugin to use the new SEMS+ server as default, as the old server will be deprecated. When updating, make sure the check the 'Use SEMS+ API' setting is set to 'Yes'.
+The plugin uses the SEMS+ API exclusively. The retired legacy SEMS API is no longer supported; no API selection setting is required. Existing hardware configurations can keep their saved settings, including any previously stored API-selection value.
 
 Important update note (v4)
 ----------------------
