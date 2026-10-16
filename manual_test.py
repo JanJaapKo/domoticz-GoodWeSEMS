@@ -142,7 +142,7 @@ def setup_plugin_environment(plugin_module):
         "Mode6": "Normal",
         "Mode1": "test-powerstation-id",
         "Mode2": "30",
-        "Version": "5.9.0",
+        "Version": "6.0.0",
         "Address": "eu.semsportal.com",
         "Port": "443",
         "Username": "test@example.com",
