@@ -19,11 +19,11 @@ python -m compileall -q GoodWe.py plugin.py exceptions.py fakeDomoticz.py
 ## Regression Test Guidelines
 
 - Add or update a regression test whenever a bug is fixed or observable behavior changes. First reproduce the failure in a test where practical.
-- For SEMS+ station-data routing, verify SEMS+ uses the web data path without posting to the retired monitor endpoint, and verify the legacy SEMS client still uses its monitor endpoint.
+- Verify station discovery and telemetry use the SEMS+ endpoints only. Assert that login failure and polling do not call retired legacy login, station-list, monitor, or control endpoints.
 - For API changes, test request URL, payload, headers, regional host selection, and error responses with mocked HTTP calls. Cover incomplete or empty telemetry where it affects Domoticz-facing data.
 - For plugin changes, use the fake Domoticz host to cover station discovery and persistence, missing station IDs, device creation/update behavior, heartbeat scheduling, and protection against suspicious zero energy-counter resets when relevant.
 - Keep tests deterministic and offline. Mock network calls; do not commit credentials, account data, or live-service dependencies.
-- Preserve compatibility between the SEMS and SEMS+ clients unless a change explicitly removes that contract. Keep plugin-facing station and inverter data safe for incomplete API responses.
+- Keep plugin-facing station and inverter data safe for incomplete API responses. The plugin supports SEMS+ only; do not add legacy SEMS endpoint fallbacks.
 - Update the README or plugin configuration documentation when user-visible behavior, setup, or limitations change. Update the plugin version for a release as appropriate.
 
 ## Pull Requests

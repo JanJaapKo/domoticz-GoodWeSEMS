@@ -17,12 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.8.2" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="5.9.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
-        <p>This version will repalce the old one per MAy 2026</p>
-        <p>Version: 5.8.2</p>
+        <p>The retired legacy SEMS API is no longer supported.</p>
+        <p>Version: 5.9.0</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -59,12 +59,6 @@
         <param field="Mode3" label="Peak power [W]" width="300px">
             <description>Optional: Peak power, supply values (separated by ';'): total power; power per string</description>
         </param>
-        <param field="Mode4" label="use SEMS + API" width="75px">
-            <options>
-                <option label="No" value="No" />
-                <option label="Yes" value="Yes" default="true"/>
-            </options>
-        </param>
         <param field="Mode6" label="Log level" width="75px">
             <options>
                 <option label="Verbose" value="Verbose"/>
@@ -88,12 +82,11 @@ except ImportError:
 import os
 import sys, time
 from datetime import datetime, timedelta
-from GoodWe import GoodWe, GoodWeSEMSPlus
+from GoodWe import GoodWeSEMSPlus
 import exceptions
 import logging
 
 class GoodWeSEMSPlugin:
-    httpConn = None
     runAgain = 6
     devicesUpdated = False
     goodWeAccount = None
@@ -491,10 +484,12 @@ class GoodWeSEMSPlugin:
         if not self.enabled:
             return False
 
-        if Parameters["Mode4"] == "Yes":
-            self.goodWeAccount = GoodWeSEMSPlus(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
-        else:
-            self.goodWeAccount = GoodWe(Parameters["Address"], Parameters["Port"], Parameters["Username"], Parameters["Password"])
+        self.goodWeAccount = GoodWeSEMSPlus(
+            Parameters["Address"],
+            Parameters["Port"],
+            Parameters["Username"],
+            Parameters["Password"],
+        )
         self.runAgain = int(Parameters["Mode2"])
 
         self.startDeviceUpdateV2()
@@ -502,49 +497,17 @@ class GoodWeSEMSPlugin:
     def onStop(self):
         Domoticz.Log("onStop - Plugin is stopping.")
         logging.info("onStop - Plugin is stopping.")
-        if self.httpConn is not None:
-            self.httpConn.Disconnect()
-
-    def onConnect(self, Connection, Status, Description):
-        logging.debug("onConnect: Status: '" + str(Status) + "', Description: '" + Description + "'")
-        if (Status == 0):
-            logging.debug("Connected to SEMS portal API successfully.")
-            self.startDeviceUpdate(Connection)
-        else:
-            Domoticz.Log("Failed to connect (" + str(Status) + ") to: " + Parameters["Address"] + ":" + Parameters[
-                "Port"] + " with error: " + Description)
-            logging.info("Failed to connect (" + str(Status) + ") to: " + Parameters["Address"] + ":" + Parameters[
-                "Port"] + " with error: " + Description)
 
     def onCommand(self, DeviceID, Unit, Command, Level, Hue):
         logging.debug("onCommand called for Device '" + str(DeviceID) + "', Unit '" + str(Unit) + "': Parameter '" + str(Command) + "', Level: " + str(Level))
-        if Unit == self.inverterStateCommand:
-            mode = Level / 10
-            # self.goodWeAccount.setInverterStatus("54200DSN196R0358","54200DSN196R0358",4)
-            return
-
-    def onDisconnect(self, Connection):
-        logging.debug("onDisconnect called for connection to: " + Connection.Address + ":" + Connection.Port)
-        self.httpConn = None
 
     def onHeartbeat(self):
         if self.enabled:
-            if Parameters["Mode4"] == "Yes":
-                self.runAgain = self.runAgain - 1
-                if self.runAgain <= 0:
-                    logging.debug("onHeartbeat called, starting SEMS+ device update.")
-                    self.startDeviceUpdateV2()
-                    self.runAgain = int(Parameters["Mode2"])
-                return
-
-            if self.httpConn is not None and (self.httpConn.Connecting() or self.httpConn.Connected()) and not self.devicesUpdated:
-                logging.debug("onHeartbeat called, Connection is alive.")
-            else:
-                self.runAgain = self.runAgain - 1
-                if self.runAgain <= 0:
-                    logging.debug("onHeartbeat called, starting device update.")
-                    self.startDeviceUpdateV2()
-                    self.runAgain = int(Parameters["Mode2"])
+            self.runAgain -= 1
+            if self.runAgain <= 0:
+                logging.debug("onHeartbeat called, starting SEMS+ device update.")
+                self.startDeviceUpdateV2()
+                self.runAgain = int(Parameters["Mode2"])
 
     def checkVersion(self, version):
         """checks actual version against stored version as 'Ma.Mi.Pa' and checks if updates needed"""
@@ -628,10 +591,6 @@ def onStop():
     global _plugin
     _plugin.onStop()
 
-def onConnect(Connection, Status, Description):
-    global _plugin
-    _plugin.onConnect(Connection, Status, Description)
-
 def onCommand(DeviceID, Unit, Command, Level, Color):
     global _plugin
     _plugin.onCommand(DeviceID, Unit, Command, Level, Color)
@@ -639,10 +598,6 @@ def onCommand(DeviceID, Unit, Command, Level, Color):
 def onNotification(Name, Subject, Text, Status, Priority, Sound, ImageFile):
     global _plugin
     _plugin.onNotification(Name, Subject, Text, Status, Priority, Sound, ImageFile)
-
-def onDisconnect(Connection):
-    global _plugin
-    _plugin.onDisconnect(Connection)
 
 def onHeartbeat():
     global _plugin

@@ -142,8 +142,7 @@ def setup_plugin_environment(plugin_module):
         "Mode6": "Normal",
         "Mode1": "test-powerstation-id",
         "Mode2": "30",
-        "Mode4": "No",
-        "Version": "5.0.0",
+        "Version": "5.9.0",
         "Address": "eu.semsportal.com",
         "Port": "443",
         "Username": "test@example.com",
@@ -290,7 +289,6 @@ def test_power_station_discovery_and_persistence(plugin_module):
     heartbeat_updates = []
     plugin.enabled = True
     plugin.runAgain = 1
-    plugin_module.Parameters["Mode4"] = "Yes"
     plugin_module.Parameters["Mode2"] = "30"
     plugin.startDeviceUpdateV2 = lambda: heartbeat_updates.append(True)
     plugin.onHeartbeat()

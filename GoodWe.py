@@ -34,10 +34,7 @@ import base64
 import uuid
 from urllib.parse import urlsplit
 
-OLD_LOGIN_URL = "https://www.semsportal.com/api/v3/Common/CrossLogin"
 NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
-_PowerStationURLPart = "/v3/PowerStation/GetMonitorDetailByPowerstationId"
-_PowerControlURLPart = "/PowerStation/SaveRemoteControlInverter"
 _RequestTimeout = 30
 _SuccessCodes = {0, "0", "00000"}
 _BrowserUserAgent = (
@@ -51,13 +48,7 @@ _NewLoginHeaders = {
     "token": '{"uid":"","timestamp":0,"token":"","client":"semsPlusWeb","version":"","language":"en"}',
 }
 
-_DefaultHeaders = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-    "token": '{"version":"3.1.1","client":"ios","language":"en"}',
-}
 _NewLoginFallbackApi = "https://eu-gateway.semsportal.com/web/sems"
-_LegacyApiFallback = "https://eu.semsportal.com/api"
 
 try:
     import DomoticzEx as Domoticz
@@ -228,7 +219,7 @@ class PowerStation:
             _maxDeviceNum += inv.domoticzDevices
         return _maxDeviceNum
 
-class GoodWe:
+class _GoodWeAccountBase:
     """
     A class to describe the methods and properties of a GoodWe account.
     An account consists of 1 or more power stations.
@@ -238,12 +229,6 @@ class GoodWe:
     Address = ""
     Port = ""
     token = ""
-    default_token = {
-        "client": "web",
-        "version": "v3.1",
-        "language": "en-GB"
-    } #default token, will be updated by tokenRequest()
-
     INVERTER_STATE = {
         -1: 'offline',
         0: 'waiting',
@@ -255,12 +240,12 @@ class GoodWe:
     powerStationIndex = 0
 
     def __init__(self, Address, Port, User, Password):
-        self.Address = "https://" + Address + "/api"
+        self.Address = Address
         self.Port = Port
         self.Username = User
         self.Password = Password
-        self.base_url = self.Address 
-        self.token = self.default_token
+        self.base_url = ""
+        self.token = {}
         return
 
     @property
@@ -272,123 +257,17 @@ class GoodWe:
         self.powerStationList.update({1 : powerStation})
         logging.debug("PowerStation created: '" + powerStation.id + "'")
 
-    def apiRequestHeadersV2(self):
-        logging.debug("build apiRequestHeaders")
-        return {
-            'User-Agent': _BrowserUserAgent,
-            'token': json.dumps(self.token)
-        }
-
-    def tokenRequest(self):
-        logging.debug("build tokenRequest")
-        url = '/v2/Common/CrossLogin'
-        loginPayload = {
-            'account': self.Username,
-            'pwd': self.Password,
-        }
-
-        try:
-            r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=loginPayload, timeout=10)
-        except requests.exceptions.RequestException as exp:
-            logging.error("TokenRequestException: " + str(exp))
-            Domoticz.Error("TokenRequestException: " + str(exp))
-            self.tokenAvailable = False
-            return
-
-        #r.raise_for_status()
-        logging.debug("building token request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        try:
-            apiResponse = r.json()
-        except json.decoder.JSONDecodeError as exp:
-            logging.error("TokenRequestException: " + str(exp))
-            Domoticz.Error("TokenRequestException: " + str(exp))
-            self.tokenAvailable = False
-            return
-
-        if apiResponse.get("code") == 100005:
-            raise exceptions.GoodweException("invalid password or username")
-
-        # Adaptation robuste pour trouver l'URL API
-        apiUrl = None
-        if "components" in apiResponse and "api" in apiResponse["components"]:
-            apiUrl = apiResponse["components"]["api"]
-        elif "data" in apiResponse and "api" in apiResponse["data"]:
-            apiUrl = apiResponse["data"]["api"]
-        elif "api" in apiResponse:
-            apiUrl = apiResponse["api"]
-
-        if not apiUrl:
-            logging.error("Unexpected API response, no 'api' key")
-            Domoticz.Error("Unexpected API response, no 'api' key")
-            self.tokenAvailable = False
-            return
-        if apiResponse == 'Null':
-            logging.info("SEMS API Token not received")
-            self.tokenAvailable = False
-        else:
-            self.token = apiResponse.get('data', {})
-            logging.debug("SEMS API token received")
-            self.tokenAvailable = True
-            self.base_url = apiUrl + "/v2"
-        
-        return r.status_code
-
-    def stationListRequest(self):
-        logging.debug("build stationListRequest")
-        url = '/HistoryData/QueryPowerStationByHistory'
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), timeout=5)
- 
-        logging.debug("building station list on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-
-        return r.status_code
-
-    def powerStationListRequest(self):
-        """Retrieve the account's stations from the configured SEMS region."""
-        url = self.Address.rstrip("/") + "/v3/PowerStation/GetPowerStationList"
-        response = requests.post(
-            url,
-            headers=self.apiRequestHeadersV2(),
-            json={},
-            timeout=10,
-        )
-        response.raise_for_status()
-        try:
-            api_response = response.json()
-        except json.decoder.JSONDecodeError as exp:
-            raise exceptions.GoodweException("Power station list response was not valid JSON") from exp
-
-        if isinstance(api_response, dict) and "code" in api_response and api_response["code"] not in _SuccessCodes:
-            raise exceptions.GoodweException(
-                "Power station list request failed: "
-                + str(api_response.get("msg", api_response["code"]))
-            )
-        return api_response
-
     def stationDataRequestV2(self, stationId):
         for i in range(1, 4):
             try:
-                logging.debug("build stationDataRequest for 1 station, attempt: " + str(i))
-
+                logging.debug("build SEMS+ station data request, attempt: " + str(i))
                 responseData = self.stationDataRequest(stationId)
                 if not responseData:
                     return
                 if isinstance(responseData, dict) and isinstance(responseData.get("inverter"), list):
                     logging.debug("Received normalized SEMS+ telemetry data")
                     return responseData
-                try:
-                    code = int(responseData['code'])
-                except (ValueError, KeyError):
-                    raise exceptions.FailureWithoutErrorCode
-
-                if code == 0 and responseData['data'] is not None:
-                    #data successfully received
-                    return responseData['data']
-                elif code == 100001 or code == 100002:
-                    #token has expired or is not valid
-                    logging.info("Failed to call GoodWe API (no valid token), will be refreshed")
-                    self.tokenRequest()
-                else:
-                    raise exceptions.FailureWithErrorCode(code)
+                raise exceptions.FailureWithoutErrorCode
             except requests.exceptions.RequestException as exp:
                 logging.error("RequestException: " + str(exp))
                 Domoticz.Error("RequestException: " + str(exp))
@@ -396,50 +275,9 @@ class GoodWe:
         else:
             raise exceptions.TooManyRetries
 
-    def stationDataRequest(self, stationId):
-        url = '/PowerStation/GetMonitorDetailByPowerstationId'
-        payload = {
-            'powerStationId' : stationId
-        }
-
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
-        logging.debug("building station data request on URL: " + r.url + " which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        try:
-            apiResponse = r.json()
-        except json.decoder.JSONDecodeError as exp:
-            logging.error("RequestException: " + str(exp))
-            Domoticz.Error("RequestException: " + str(exp))
-            return False
-        logging.debug("response station data request : " + json.dumps(r.json()))
-        return apiResponse
-        
-    def setInverterStatus(self, stationId, inverterSn, mode):
-        # control inverter going on or off
-        # mode 1: ON
-        # mode 2: OFF
-        url = '/PowerStation/SaveRemoteControlInverter'
-        payload = {
-            "inverterSN": inverterSn,
-            'powerStationId' : stationId,
-            'InverterStatusSettingMark': 1,
-            'InverterStatus': mode
-        }
-
-        r = requests.post(self.base_url + url, headers=self.apiRequestHeadersV2(), data=payload, timeout=10)
-        logging.debug("building inverter mode post on URL: " + r.url + " and payload: '"+str(payload)+ "' which returned status code: " + str(r.status_code) + " and response length = " + str(len(r.text)))
-        try:
-            apiResponse = r.json()
-        except json.decoder.JSONDecodeError as exp:
-            logging.error("RequestException: " + str(exp))
-            Domoticz.Error("RequestException: " + str(exp))
-            return False
-        logging.debug("response inverter mode post : " + json.dumps(r.json()))
-        return apiResponse
-
-
-class GoodWeSEMSPlus(GoodWe):
+class GoodWeSEMSPlus(_GoodWeAccountBase):
     """
-    A class to handle GoodWe SEMS+ API, similar to GoodWe but using the new endpoint.
+    A class to handle the GoodWe SEMS+ API.
     """
 
     def _refreshWebSession(self):
@@ -451,7 +289,7 @@ class GoodWeSEMSPlus(GoodWe):
         """Retrieve stations from the authenticated SEMS+ Web API."""
         url_part = "/sems-plant/api/portal/stations/page"
         for attempt in range(2):
-            api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+            api_base = self.base_url.rstrip("/")
             headers = self.apiRequestHeadersV2()
             if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
                 signature = self._generate_signature(self.token)
@@ -531,54 +369,6 @@ class GoodWeSEMSPlus(GoodWe):
             {"sns": list(serialNumbers), "deviceType": deviceType},
         )
 
-    def _is_powerstation_route(self, url_part):
-        """Return whether the route should use the legacy PowerStation host."""
-        return url_part.startswith("/PowerStation") or url_part.startswith("/v3/PowerStation")
-
-    def _extract_gateway_region(self, api_base):
-        """Return the SEMS region prefix from a gateway API base."""
-        host = api_base.split("//", 1)[-1].split("/", 1)[0]
-        if host.endswith("-gateway.semsportal.com"):
-            return host.removesuffix("-gateway.semsportal.com") or None
-        if host.endswith(".semsportal.com"):
-            return host.split(".", 1)[0] or None
-        return None
-
-    def _normalize_powerstation_api_base(self, api_base, url_part):
-        """Return the effective API base for PowerStation requests."""
-        if not self._is_powerstation_route(url_part):
-            return api_base
-        if "/web/sems" not in api_base and "/sems/" not in api_base:
-            return api_base
-
-        region = None
-        if isinstance(self.token, dict) and isinstance(self.token.get("region"), str):
-            region = self.token["region"] or None
-        if region is None:
-            region = self._extract_gateway_region(api_base)
-
-        if region:
-            rewritten_base = f"https://{region}.semsportal.com/api"
-            logging.debug(
-                "SEMS - Rewriting API base from %s to %s for %s",
-                api_base,
-                rewritten_base,
-                url_part,
-            )
-            return rewritten_base
-
-        logging.debug(
-            "SEMS - Rewriting API base from %s to %s for %s",
-            api_base,
-            _LegacyApiFallback,
-            url_part,
-        )
-        return _LegacyApiFallback
-
-    def _resolve_api_base_for_url_part(self, api_base, url_part):
-        """Return the effective API base for a given endpoint path."""
-        return self._normalize_powerstation_api_base(api_base, url_part)
-
     def _hash_password_for_new_login(self, password):
         md5_hex = hashlib.md5(password.encode("utf-8")).hexdigest()
         return base64.b64encode(md5_hex.encode("utf-8")).decode("utf-8")
@@ -648,26 +438,6 @@ class GoodWeSEMSPlus(GoodWe):
 
         return self._extract_login_token(apiResponse, _NewLoginFallbackApi)
 
-    def _get_legacy_login_token(self):
-        login_data = json.dumps({"account": self.Username, "pwd": self.Password})
-        try:
-            # Ensure a browser User-Agent is present while preserving legacy headers
-            headers = {"User-Agent": _BrowserUserAgent, **_DefaultHeaders}
-            r = requests.post(OLD_LOGIN_URL, headers=headers, data=login_data, timeout=_RequestTimeout)
-        except requests.exceptions.RequestException as exp:
-            logging.error("SEMS legacy login request failed: %s", exp)
-            Domoticz.Error("SEMS legacy login request failed: " + str(exp))
-            return None
-
-        try:
-            apiResponse = r.json()
-        except json.decoder.JSONDecodeError as exp:
-            logging.error("SEMS legacy login JSONDecodeError: %s", exp)
-            Domoticz.Error("SEMS legacy login JSONDecodeError: " + str(exp))
-            return None
-
-        return self._extract_login_token(apiResponse, _LegacyApiFallback)
-
     def apiRequestHeadersV2(self):
         logging.debug("build SEMS+ apiRequestHeaders")
         return {
@@ -680,10 +450,6 @@ class GoodWeSEMSPlus(GoodWe):
     def tokenRequest(self):
         logging.debug("build SEMS+ tokenRequest with username: '%s'", self.Username)
         token_data = self._get_new_login_token()
-        if token_data is None:
-            logging.info("SEMS+ new login failed, trying legacy SEMS login")
-            token_data = self._get_legacy_login_token()
-
         if token_data is None:
             self.tokenAvailable = False
             return
@@ -724,7 +490,7 @@ class GoodWeSEMSPlus(GoodWe):
     def getWebInverterDevices(self, powerStationId):
         self._webDeviceListRequiresRelogin = False
         url_part = f"/sems-plant/api/stations/device/all-status?stationId={powerStationId}"
-        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+        api_base = self.base_url.rstrip("/")
         headers = self.apiRequestHeadersV2()
         # add X-Signature for web token
         if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
@@ -780,7 +546,7 @@ class GoodWeSEMSPlus(GoodWe):
 
     def getWebInverterTelemetry(self, powerStationId, serialNumber, device_type="INVERTER"):
         url_part = f"/sems-plant/api/equipments/{serialNumber}/telemetry?deviceType={device_type}&pwId={powerStationId}"
-        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+        api_base = self.base_url.rstrip("/")
         headers = self.apiRequestHeadersV2()
         if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
             sig = self._generate_signature(self.token)
@@ -888,7 +654,7 @@ class GoodWeSEMSPlus(GoodWe):
 
     def getWebInverterTelecounting(self, powerStationId, serialNumber, device_type="INVERTER"):
         url_part = f"/sems-plant/api/equipments/{serialNumber}/telecounting?deviceType={device_type}&pwId={powerStationId}"
-        api_base = self._resolve_api_base_for_url_part(self.base_url, url_part)
+        api_base = self.base_url.rstrip("/")
         headers = self.apiRequestHeadersV2()
         if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
             sig = self._generate_signature(self.token)
@@ -971,24 +737,3 @@ class GoodWeSEMSPlus(GoodWe):
             'inverter': inverters,
         }
 
-    def setInverterStatus(self, stationId, inverterSn, mode):
-        url = _PowerControlURLPart
-        payload = {
-            "InverterSN": inverterSn,
-            'powerStationId': stationId,
-            'InverterStatusSettingMark': 1,
-            'InverterStatus': mode
-        }
-
-        api_base = self._resolve_api_base_for_url_part(self.base_url, url)
-        r = requests.post(api_base + url, headers=self.apiRequestHeadersV2(), json=payload, timeout=10)
-        logging.debug("building SEMS+ inverter mode post on URL: %s and payload: '%s' which returned status code: %s and response length = %s", r.url, str(payload), r.status_code, len(r.text))
-        try:
-            apiResponse = r.json()
-        except json.decoder.JSONDecodeError as exp:
-            logging.error("SEMS+ inverter mode post JSONDecodeError: %s", exp)
-            Domoticz.Error("SEMS+ inverter mode post JSONDecodeError: " + str(exp))
-            return False
-        logging.debug("response inverter mode post : %s", json.dumps(apiResponse))
-        return apiResponse
-        
