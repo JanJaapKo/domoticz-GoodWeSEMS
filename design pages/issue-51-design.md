@@ -3,13 +3,11 @@
 ## Goal
 
 Support every power station returned for the configured SEMS+ account from one
-Domoticz hardware instance. Each station's inverters must continue to be
-represented by stable Domoticz devices identified by inverter serial number.
-This addresses [issue #51](https://github.com/JanJaapKo/domoticz-GoodWeSEMS/issues/51).
-
-The feature is account-wide discovery, not selection by a user-entered power
-station ID. The SEMS+ station-list API supplies station IDs to the plugin; users
-should not need to obtain or maintain those IDs themselves.
+Domoticz hardware instance by default. For backwards compatibility, users may
+optionally provide a power station ID in `Mode1` to restrict device creation and
+updates to that station. Each station's inverters remain represented by stable
+Domoticz devices identified by inverter serial number. This addresses
+[issue #51](https://github.com/JanJaapKo/domoticz-GoodWeSEMS/issues/51).
 
 ## Current behavior and existing preparation
 
@@ -40,9 +38,11 @@ should not need to obtain or maintain those IDs themselves.
    response contract before relying on field names. Do not assume the first
    page contains every station.
 3. Normalize station-list entries into a unique, ordered collection of usable
-   station IDs. Ignore duplicate IDs. If the response is malformed or contains
-   no usable station IDs, report a clear error and do not make telemetry calls.
-4. For each discovered station ID, request station telemetry and normalize it
+   station IDs. Ignore duplicate IDs. If `Mode1` is non-empty, poll only the
+   matching station ID; if it is empty, poll every discovered station. A
+   configured ID not present in the response is an explicit error, not a reason
+   to silently poll all stations.
+4. For each selected station ID, request station telemetry and normalize it
    through the existing `stationDataRequestV2()` / `getWebData()` path.
 5. Keep each station model associated with its actual station ID. Replace the
    single fixed station key with an ID-keyed model collection, or pass the
@@ -78,10 +78,9 @@ rate limits, and session-expiry behavior before implementation.
   Verify the API/domain contract and define a deterministic, backward-compatible
   collision policy before implementation. Any composite-ID fallback must be
   limited to actual collisions so existing device history remains intact.
-- **Configuration migration:** the XML currently has no station-ID input, but
-  the plugin reads and persists `PowerStationId`. The multi-station flow must
-  stop using this value as a filter or a source of truth. Ignore/remove the
-  stale saved value safely; no user should need to delete and recreate hardware.
+- **Configuration migration:** restore `Mode1` as an optional power-station-ID
+  filter. When blank, discover and process every station. Do not use the old
+  persisted `PowerStationId` value as a filter or source of truth.
 - **Single-station accounts:** behavior and device identities remain unchanged
   when SEMS+ returns only one station.
 - **Existing data:** do not delete devices or Domoticz history for stations
@@ -108,7 +107,7 @@ rate limits, and session-expiry behavior before implementation.
 ### `plugin.py`
 
 - Replace `getPowerStationId()` and the one-station startup/update sequence with
-  discovery and processing of all station IDs.
+  discovery and processing of all station IDs, optionally filtered by `Mode1`.
 - Make the station context explicit in model creation and `updateDevices()`; do
   not rely on `powerStationList[1]`.
 - Keep inverter device creation/update keyed by serial number and keep existing
@@ -117,16 +116,16 @@ rate limits, and session-expiry behavior before implementation.
 - Isolate station-specific errors so a bad response for one station does not
   block later stations. Keep account-wide authentication and discovery errors
   explicit.
-- Remove the `PowerStationId` cache/configuration dependency once no caller
-  needs it. Do not add a UI field for an ID that users cannot reliably obtain.
+- Remove the `PowerStationId` cache/configuration dependency. Document `Mode1`
+  as optional and explain that blank means all stations.
 
 ### Documentation
 
 - Update the plugin description and README feature/limitation text: state that
   one hardware instance polls all power stations on the SEMS+ account and
   creates inverter devices identified by serial number.
-- Explain the change from the former one-station behavior and that no station ID
-  needs to be configured.
+- Explain the change from the former one-station behavior and the optional
+  `Mode1` filter.
 
 ## Full compliance and acceptance matrix
 
@@ -142,7 +141,7 @@ rate limits, and session-expiry behavior before implementation.
 | Energy safety | Empty/zero SEMS+ records do not reset prior counters; one station's record cannot update another station's device. |
 | Failure isolation | A station-specific failure is logged with station context and does not prevent processing other stations. Account-wide failures remain visible. |
 | Account changes | New stations are discovered on a later refresh; removed stations are no longer polled, and their historical devices are not deleted. |
-| Legacy configuration | A saved `PowerStationId` cannot limit the new flow; upgrades do not require hardware recreation. |
+| Legacy configuration | A saved `PowerStationId` cannot limit the new flow; only an explicitly configured `Mode1` filters stations. |
 | Single station | One-station accounts retain existing devices, names, update frequency, and behavior. |
 | Duplicate serials | Any serial collision is detected and handled by an explicit tested policy rather than overwritten silently. |
 | Logging | Logs identify station ID/name and inverter serial where useful, without exposing credentials, tokens, or raw authorization headers. |
@@ -165,12 +164,13 @@ rate limits, and session-expiry behavior before implementation.
 1. One poll discovers two or more station IDs and calls telemetry once per ID.
 2. Models for multiple stations coexist and each model contains only its own
    inverter serials.
-3. Inverters from all stations create/update distinct serial-keyed Domoticz
+3. Inverters from all selected stations create/update distinct serial-keyed Domoticz
    devices, and existing device/unit history is reused.
 4. A station-specific request or response failure does not prevent the next
    station from updating; account-wide discovery/authentication failures remain
    visible.
-5. A stale persisted `PowerStationId` does not restrict discovery.
+5. A stale persisted `PowerStationId` does not restrict discovery; empty `Mode1`
+   polls all stations and a configured `Mode1` polls only its matching station.
 6. A newly-added station appears after discovery refresh; a removed station is
    no longer requested without deleting its existing Domoticz devices.
 7. Existing energy-counter protection, optional sensor creation, offline
@@ -201,7 +201,8 @@ station-specific update values.
 
 ## Out of scope
 
-- Selecting only a subset of stations in hardware configuration.
+- Selecting arbitrary subsets of stations in hardware configuration; `Mode1`
+  supports either all stations or one specific station.
 - Requiring users to copy station IDs from a portal URL.
 - Creating separate Domoticz hardware instances or per-station credentials.
 - Deleting orphaned Domoticz devices or rewriting existing sensor history.

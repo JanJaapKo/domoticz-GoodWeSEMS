@@ -222,8 +222,8 @@ class PluginBehaviorTest(unittest.TestCase):
     def test_create_devices_adds_expected_units(self):
         manual_test.test_create_devices(self.plugin_module)
 
-    def test_station_discovery_persists_selected_id(self):
-        manual_test.test_power_station_discovery_and_persistence(self.plugin_module)
+    def test_station_discovery_supports_all_and_optional_filter(self):
+        manual_test.test_power_station_discovery_and_optional_filter(self.plugin_module)
 
     def test_missing_station_id_skips_telemetry(self):
         manual_test.test_station_discovery_failure_skips_telemetry(self.plugin_module)
@@ -257,15 +257,23 @@ class PluginBehaviorTest(unittest.TestCase):
     def test_semsplus_device_update_does_not_force_periodic_login(self):
         plugin = self.plugin_module._plugin
         plugin.establishToken = Mock(return_value=True)
-        plugin.getPowerStationId = Mock(return_value="station-uuid")
         plugin.getDeviceData = Mock(return_value={"inverter": []})
-        plugin.goodWeAccount = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        plugin.goodWeAccount = Mock(
+            tokenAvailable=True,
+            powerStationList={},
+            powerStationListRequest=Mock(return_value={"dataList": [{"id": "station-uuid"}]}),
+        )
         plugin.updateDevices = Mock()
+        self.plugin_module.Parameters["Mode1"] = ""
 
         plugin.startDeviceUpdateV2()
 
         plugin.establishToken.assert_called_once_with()
         plugin.getDeviceData.assert_called_once_with("station-uuid")
+        plugin.goodWeAccount.createStationV2.assert_called_once_with(
+            {"inverter": []}, "station-uuid"
+        )
+        plugin.updateDevices.assert_called_once_with({"inverter": []}, "station-uuid")
 
     def test_establish_token_handles_known_api_errors(self):
         plugin = self.plugin_module._plugin
@@ -339,7 +347,7 @@ class PluginBehaviorTest(unittest.TestCase):
             "inverter": [{"sn": "sn_generating", "name": "inverter"}],
         })
         account = Mock()
-        account.powerStationList = {1: station}
+        account.powerStationList = {"station-uuid": station}
         account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
         plugin.goodWeAccount = account
         self.plugin_module.Devices = {}
@@ -362,7 +370,7 @@ class PluginBehaviorTest(unittest.TestCase):
             "battery": "",
             "bms_status": "",
             "battery_power": "",
-        }]})
+        }]}, "station-uuid")
 
         units = self.plugin_module.Devices["sn_generating"].Units
         self.assertEqual(units[plugin.inverterStateUnit].sValue, "30")
@@ -385,7 +393,7 @@ class PluginBehaviorTest(unittest.TestCase):
             "inverter": [{"sn": "sn_offline", "name": "inverter"}],
         })
         account = Mock()
-        account.powerStationList = {1: station}
+        account.powerStationList = {"station-uuid": station}
         account.INVERTER_STATE = {0: "offline"}
         plugin.goodWeAccount = account
         self.plugin_module.Devices = {}
@@ -409,11 +417,11 @@ class PluginBehaviorTest(unittest.TestCase):
             "battery_power": "",
         }
 
-        plugin.updateDevices({"inverter": [inverter_data]})
+        plugin.updateDevices({"inverter": [inverter_data]}, "station-uuid")
         self.assertEqual(temperature_unit.sValue, "21.0")
 
         inverter_data["tempperature"] = 24.7
-        plugin.updateDevices({"inverter": [inverter_data]})
+        plugin.updateDevices({"inverter": [inverter_data]}, "station-uuid")
         self.assertEqual(temperature_unit.sValue, "24.7")
 
     def test_update_devices_creates_only_reported_ac_phases(self):
@@ -423,7 +431,7 @@ class PluginBehaviorTest(unittest.TestCase):
             "inverter": [{"sn": "sn_three_phase", "name": "inverter"}],
         })
         account = Mock()
-        account.powerStationList = {1: station}
+        account.powerStationList = {"station-uuid": station}
         account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
         plugin.goodWeAccount = account
         self.plugin_module.Devices = {}
@@ -447,7 +455,7 @@ class PluginBehaviorTest(unittest.TestCase):
             "battery": "",
             "bms_status": "",
             "battery_power": "",
-        }]})
+        }]}, "station-uuid")
 
         units = self.plugin_module.Devices["sn_three_phase"].Units
         self.assertEqual(units[plugin.outputCurrentUnit].sValue, "8.1")

@@ -252,10 +252,11 @@ class _GoodWeAccountBase:
     def numStations(self):
         return len(self.powerStationList)
         
-    def createStationV2(self, stationData):
-        powerStation = PowerStation(stationData=stationData)
-        self.powerStationList.update({1 : powerStation})
-        logging.debug("PowerStation created: '" + powerStation.id + "'")
+    def createStationV2(self, stationData, stationId=None):
+        powerStation = PowerStation(stationData=stationData, id=stationId)
+        stationId = powerStation.id or stationId
+        self.powerStationList[stationId] = powerStation
+        logging.debug("PowerStation created: '" + stationId + "'")
 
     def stationDataRequestV2(self, stationId):
         for i in range(1, 4):
@@ -736,4 +737,3 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             },
             'inverter': inverters,
         }
-

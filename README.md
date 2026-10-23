@@ -63,8 +63,8 @@ for feature requests or bug reports. If you know how to develop software, please
 
 Current features
 ----------------
-1. Automatically select the first station for a specific user account
-2. Automatically get data for all inverters in that station
+1. Automatically discover and get data for all power stations and their inverters in a SEMS+ account. Optionally set a power station ID in the hardware configuration to restrict polling to that station.
+2. Inverter devices retain their serial-number identity in Domoticz.
 3. The following devices are added to Domoticz for each inverter:
 
 |Unit	|Description	|Type   |Remark
@@ -96,13 +96,12 @@ There is a lot more information available trough the GoodWe API if you would lik
 
 Current limitations
 ----------------
-1. You can only fetch data for 1 powerstation (which can consist of more than 1 inverter). The first station returned by SEMS is selected automatically.
-2. The GoodWE API does not always respond in time, leading to errors like below. This is not a problem, data will be updated on the next try. 
+1. The GoodWE API does not always respond in time, leading to errors like below. This is not a problem, data will be updated on the next try.
 ``` 
 Error: Zonnepanelen: (Zonnepanelen) RequestException: HTTPSConnectionPool(host='eu.semsportal.com', port=443): Read timed out. (read timeout=10)
 Error: Zonnepanelen: (Zonnepanelen) Failed to request data: Failed to call GoodWe API (too many retries)
 ```
-3. The SEMS+ API has a very short lifetime for the authorisation token, so on each poll you can see a logline like below in the logfile. This is no problem it will automatically refresh:
+2. The SEMS+ API has a very short lifetime for the authorisation token, so on each poll you can see a logline like below in the logfile. This is no problem it will automatically refresh:
 ```
 2026-05-14 12:15:16,321 - INFO     - GoodWe.py          - Failed to call GoodWe API (no valid token), will be refreshed
 ```
