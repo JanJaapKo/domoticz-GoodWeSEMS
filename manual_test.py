@@ -142,7 +142,7 @@ def setup_plugin_environment(plugin_module):
         "Mode6": "Normal",
         "Mode1": "test-powerstation-id",
         "Mode2": "30",
-        "Version": "6.0.0",
+        "Version": "6.1.0",
         "Address": "eu.semsportal.com",
         "Port": "443",
         "Username": "test@example.com",
@@ -216,12 +216,13 @@ def test_update_devices_skips_zero_counter_reset(plugin_module):
         "bms_status": 0,
         "battery_power": 0,
     }
+    station_id = "station-counter"
     station = types.SimpleNamespace(inverters={serial_number: plugin_module._plugin})
     plugin_module._plugin.goodWeAccount = types.SimpleNamespace(
-        powerStationList={1: station}, INVERTER_STATE={0: "offline"}
+        powerStationList={station_id: station}, INVERTER_STATE={0: "offline"}
     )
 
-    plugin_module._plugin.updateDevices({"inverter": [inverter_data]})
+    plugin_module._plugin.updateDevices({"inverter": [inverter_data]}, station_id)
     assert output_unit.sValue == "588.0;9066300.0", "A zero total must not reset an existing counter"
     assert output_unit.update_called == 0, "A suspicious zero counter update must be skipped"
     for unit, value in unchanged_units:
@@ -229,7 +230,7 @@ def test_update_devices_skips_zero_counter_reset(plugin_module):
         assert unit.update_called == 0, f"{unit.Name} must not be updated for an empty record"
 
     inverter_data["etotal"] = 9066.4
-    plugin_module._plugin.updateDevices({"inverter": [inverter_data]})
+    plugin_module._plugin.updateDevices({"inverter": [inverter_data]}, station_id)
     assert output_unit.sValue == "0;9066400.0", "Zero live power with a valid total must still update"
     assert output_unit.update_called == 1, "A valid cumulative counter update must be applied"
     print("test_update_devices_skips_zero_counter_reset passed")
@@ -247,9 +248,8 @@ def test_create_devices(plugin_module):
     print("test_create_devices passed")
 
 
-def test_power_station_discovery_and_persistence(plugin_module):
-    print("\nRunning test_power_station_discovery_and_persistence()")
-    fakeDomoticz_module.configuration_store.pop("PowerStationId", None)
+def test_power_station_discovery_and_optional_filter(plugin_module):
+    print("\nRunning test_power_station_discovery_and_optional_filter()")
 
     class FakeGoodWeAccount:
         tokenAvailable = True
@@ -257,6 +257,7 @@ def test_power_station_discovery_and_persistence(plugin_module):
         def __init__(self):
             self.station_list_requests = 0
             self.telemetry_station_ids = []
+            self.powerStationList = {}
 
         def powerStationListRequest(self):
             self.station_list_requests += 1
@@ -269,22 +270,34 @@ def test_power_station_discovery_and_persistence(plugin_module):
             self.telemetry_station_ids.append(station_id)
             return {"inverter": []}
 
-        def createStationV2(self, station_data):
-            pass
+        def createStationV2(self, station_data, station_id):
+            self.powerStationList[station_id] = types.SimpleNamespace(id=station_id)
 
     account = FakeGoodWeAccount()
     plugin = plugin_module._plugin
-    plugin_module.Parameters.pop("Mode1", None)
-    plugin.powerStationId = ""
+    plugin_module.Parameters["Mode1"] = ""
     plugin.goodWeAccount = account
     plugin.establishToken = lambda: True
-    plugin.updateDevices = lambda station_data: None
+    plugin.updateDevices = lambda station_data, station_id: None
     plugin.startDeviceUpdateV2()
     plugin.startDeviceUpdateV2()
 
-    assert account.station_list_requests == 1, "Station list should be fetched only once"
-    assert account.telemetry_station_ids == ["station-first", "station-first"]
-    assert fakeDomoticz_module.configuration_store["PowerStationId"] == "station-first"
+    assert account.station_list_requests == 2, "Station list should be refreshed on each poll"
+    assert account.telemetry_station_ids == [
+        "station-first", "station-second", "station-first", "station-second"
+    ], "All discovered stations should be polled by default"
+    assert account.powerStationList.keys() == {"station-first", "station-second"}
+    assert "PowerStationId" not in fakeDomoticz_module.configuration_store
+
+    plugin_module.Parameters["Mode1"] = "station-second"
+    account.telemetry_station_ids = []
+    plugin.startDeviceUpdateV2()
+    assert account.telemetry_station_ids == ["station-second"], "Mode1 should restrict polling to the selected station"
+    assert account.powerStationList.keys() == {"station-second"}
+
+    plugin_module.Parameters["Mode1"] = "station-not-found"
+    plugin.startDeviceUpdateV2()
+    assert account.telemetry_station_ids == ["station-second"], "An unmatched Mode1 must not fall back to all stations"
 
     heartbeat_updates = []
     plugin.enabled = True
@@ -292,14 +305,12 @@ def test_power_station_discovery_and_persistence(plugin_module):
     plugin_module.Parameters["Mode2"] = "30"
     plugin.startDeviceUpdateV2 = lambda: heartbeat_updates.append(True)
     plugin.onHeartbeat()
-    assert heartbeat_updates == [True], "Heartbeat should schedule an update without Mode1"
-    print("test_power_station_discovery_and_persistence passed")
+    assert heartbeat_updates == [True], "Heartbeat should schedule an update with Mode1 configured"
+    print("test_power_station_discovery_and_optional_filter passed")
 
 
 def test_station_discovery_failure_skips_telemetry(plugin_module):
     print("\nRunning test_station_discovery_failure_skips_telemetry()")
-    fakeDomoticz_module.configuration_store.pop("PowerStationId", None)
-
     class FakeGoodWeAccount:
         tokenAvailable = True
 
@@ -315,7 +326,6 @@ def test_station_discovery_failure_skips_telemetry(plugin_module):
 
     account = FakeGoodWeAccount()
     plugin = plugin_module._plugin
-    plugin.powerStationId = ""
     plugin.goodWeAccount = account
     plugin.establishToken = lambda: True
     plugin.startDeviceUpdateV2()
@@ -349,7 +359,7 @@ def main():
         test_calculate_new_energy,
         test_update_devices_skips_zero_counter_reset,
         test_create_devices,
-        test_power_station_discovery_and_persistence,
+        test_power_station_discovery_and_optional_filter,
         test_station_discovery_failure_skips_telemetry,
         test_check_version,
     ]

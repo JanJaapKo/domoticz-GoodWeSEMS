@@ -17,21 +17,18 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.0.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.1.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
         <p>The retired legacy SEMS API is no longer supported.</p>
-        <p>Version: 6.0.0</p>
+        <p>Version: 6.1.0</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
             <li>Register your inverter at GoodWe SEMS portal (if not done already): <a href="https://www.semsportal.com">https://www.semsportal.com</a></li>
-            <li>Choose one of the following options:</li>
-            <ol type="a">
-                    <li>The first power station in your SEMS account is added to Domoticz automatically.</li>
-                    <li>Only one power station is supported per plugin instance.</li>
-            </ol>
+            <li>All power stations in your SEMS+ account are added to Domoticz automatically.</li>
+            <li>Optionally provide a power station ID to limit the plugin to that station.</li>
         </ul>
     </description>
     <params>
@@ -45,6 +42,9 @@
         <param field="Port" label="SEMS API Port" width="30px" required="true" default="443"/>
         <param field="Username" label="E-Mail address" width="300px" required="true"/>
         <param field="Password" label="Password" width="100px" required="true" password="true"/>
+        <param field="Mode1" label="Power station ID (optional)" width="300px">
+            <description>Optionally provide a power station ID to create and update devices only for that station. Leave empty to use all power stations returned by SEMS+.</description>
+        </param>
         <param field="Mode2" label="Refresh interval" width="75px">
             <options>
                 <option label="10s" value="1"/>
@@ -85,6 +85,7 @@ from datetime import datetime, timedelta
 from GoodWe import GoodWeSEMSPlus
 import exceptions
 import logging
+import requests
 
 class GoodWeSEMSPlugin:
     runAgain = 6
@@ -94,7 +95,6 @@ class GoodWeSEMSPlugin:
     
     baseDeviceIndex = 0
     maxDeviceIndex = 0
-    powerStationId = ""
 
     def __init__(self):
         startNum = 0
@@ -121,7 +121,6 @@ class GoodWeSEMSPlugin:
         self.outputVoltageCUnit = 21 + startNum
         self.outputCurrent3PhaseUnit = 24 + startNum
         self.enabled = False
-        self.powerStationId = ""
         return
 
     def establishToken(self):
@@ -151,52 +150,64 @@ class GoodWeSEMSPlugin:
                 return None
             return DeviceData
 
-    def getPowerStationId(self):
-        if self.powerStationId:
-            return self.powerStationId
-
-        configuredStationId = getConfigItem("PowerStationId", "")
-        if isinstance(configuredStationId, str) and configuredStationId.strip():
-            self.powerStationId = configuredStationId.strip()
-            return self.powerStationId
-
+    def getPowerStationIds(self):
         try:
             response = self.goodWeAccount.powerStationListRequest()
             stations = response.get("data", response) if isinstance(response, dict) else response
             if isinstance(stations, dict):
-                if "PowerStationId" in stations or "id" in stations:
+                if any(
+                    key in stations
+                    for key in ("PowerStationId", "powerStationId", "id")
+                ):
                     stations = [stations]
                 else:
                     stations = stations.get(
                         "dataList",
                         stations.get(
                             "powerStationList",
-                            stations.get("PowerStationList", stations.get("list")),
+                            stations.get(
+                                "PowerStationList",
+                                stations.get("list", stations.get("stations")),
+                            ),
                         ),
                     )
             if not isinstance(stations, list):
                 raise ValueError("Power station list response did not contain a station list")
 
-            stationId = next(
-                (
-                    station.get("PowerStationId", station.get("id"))
-                    for station in stations
-                    if isinstance(station, dict)
-                    and isinstance(station.get("PowerStationId", station.get("id")), str)
-                    and station.get("PowerStationId", station.get("id")).strip()
-                ),
-                None,
-            )
-            if stationId is None:
+            stationIds = []
+            for station in stations:
+                if not isinstance(station, dict):
+                    continue
+                stationId = station.get(
+                    "PowerStationId",
+                    station.get("powerStationId", station.get("id")),
+                )
+                if isinstance(stationId, str) and stationId.strip():
+                    stationId = stationId.strip()
+                    if stationId not in stationIds:
+                        stationIds.append(stationId)
+
+            if not stationIds:
                 raise ValueError("No power station ID was returned by SEMS")
 
-            self.powerStationId = stationId.strip()
-            setConfigItem(Key="PowerStationId", Value=self.powerStationId)
-            logging.info("Selected Power Station ID from SEMS account")
-            return self.powerStationId
-        except Exception as exp:
-            logging.error("Failed to retrieve Power Station ID: %s", exp)
-            Domoticz.Error("Failed to retrieve Power Station ID: " + str(exp))
+            configuredStationId = Parameters.get("Mode1", "")
+            if isinstance(configuredStationId, str) and configuredStationId.strip():
+                configuredStationId = configuredStationId.strip()
+                if configuredStationId not in stationIds:
+                    raise ValueError(
+                        "Configured power station ID was not returned by SEMS+: "
+                        + configuredStationId
+                    )
+                return [configuredStationId]
+            return stationIds
+        except (
+            exceptions.GoodweException,
+            requests.exceptions.RequestException,
+            ValueError,
+            TypeError,
+        ) as exp:
+            logging.error("Failed to retrieve Power Station IDs: %s", exp)
+            Domoticz.Error("Failed to retrieve Power Station IDs: " + str(exp))
             return None
 
     def startDeviceUpdateV2(self):
@@ -204,19 +215,21 @@ class GoodWeSEMSPlugin:
             logging.error("token not established")
             Domoticz.Error("token not established")
             return
-        stationId = self.getPowerStationId()
-        if not stationId:
+        stationIds = self.getPowerStationIds()
+        if not stationIds:
             return
-        DeviceData = self.getDeviceData(stationId)
-        if DeviceData == None:
-            logging.error("DeviceData == None")
-            Domoticz.Error("DeviceData == None")
-            return
-        self.goodWeAccount.createStationV2(DeviceData)
-        self.updateDevices(DeviceData)
+        self.goodWeAccount.powerStationList = {}
+        for stationId in stationIds:
+            DeviceData = self.getDeviceData(stationId)
+            if DeviceData is None:
+                logging.error("DeviceData == None for power station '%s'", stationId)
+                Domoticz.Error("DeviceData == None for power station '" + stationId + "'")
+                continue
+            self.goodWeAccount.createStationV2(DeviceData, stationId)
+            self.updateDevices(DeviceData, stationId)
 
-    def updateDevices(self, apiData):
-        theStation = self.goodWeAccount.powerStationList[1]
+    def updateDevices(self, apiData, stationId):
+        theStation = self.goodWeAccount.powerStationList[stationId]
         for inverter in apiData["inverter"]:
             logging.debug("inverter found with SN: '" + inverter["sn"] + "'")
             if inverter["sn"] in theStation.inverters:
