@@ -466,6 +466,121 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertEqual((three_phase_current.Type, three_phase_current.Subtype), (89, 1))
         self.assertEqual(three_phase_current.sValue, "8.1;8.7;8.3;")
 
+    def test_failed_inverter_requests_preserve_all_units_and_other_devices_update(self):
+        for failed_endpoint in ("telemetry", "telecounting"):
+            with self.subTest(failed_endpoint=failed_endpoint):
+                plugin = self.plugin_module.GoodWeSEMSPlugin()
+                account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+                account.base_url = "https://eu-gateway.semsportal.com/web/sems"
+                account.tokenAvailable = True
+                account.powerStationListRequest = Mock(return_value={
+                    "dataList": [{"id": "station-first"}, {"id": "station-second"}],
+                })
+                plugin.goodWeAccount = account
+                self.plugin_module.Parameters["Mode1"] = ""
+                self.plugin_module.Devices = {}
+                plugin.createDevices("serial-failed")
+                failed_units = self.plugin_module.Devices["serial-failed"].Units
+                for unit in failed_units.values():
+                    unit.sValue = "previous reading"
+                failed_units[plugin.outputPowerUnit].sValue = "1497.0;25687500.0"
+                before = {number: unit.sValue for number, unit in failed_units.items()}
+                calls = []
+
+                def get_response(url, **kwargs):
+                    calls.append(url)
+                    if "/all-status?" in url:
+                        serials = ["serial-failed", "serial-healthy"] if "station-first" in url else ["serial-second"]
+                        return make_response({"code": "00000", "data": {"deviceDetailList": [{
+                            "deviceType": "INVERTER",
+                            "statusDetailList": [{
+                                "status": 5,
+                                "snList": serials,
+                                "detailMap": {sn: {"sn": sn, "name": "inverter"} for sn in serials},
+                            }],
+                        }]}})
+                    if "/serial-failed/" in url and "/" + failed_endpoint + "?" in url:
+                        raise goodwe_module.requests.exceptions.Timeout("offline")
+                    if "/telecounting?" in url:
+                        return make_response({"code": "00000", "data": [{"factors": [
+                            {"code": "proPvStatsTotal", "data": 25687.5},
+                        ]}]})
+                    return make_response({"code": "00000", "data": [{"factors": [
+                        {"code": "Temperature", "data": 32},
+                        {"code": "pAc", "data": 1.497},
+                        {"code": "Vac", "data": 237.5},
+                        {"code": "Iac", "data": 6.8},
+                        {"code": "MPPT-1:Vpv", "data": 242.8},
+                        {"code": "MPPT-1:Ipv", "data": 3.2},
+                    ]}]})
+
+                with patch("GoodWe.requests.get", side_effect=get_response), self.assertLogs(level="ERROR") as captured:
+                    plugin.startDeviceUpdateV2()
+                self.assertEqual({number: unit.sValue for number, unit in failed_units.items()}, before)
+                self.assertTrue(all(unit.update_called == 0 for unit in failed_units.values()))
+                self.assertTrue(any("serial-failed" in line and "station-first" in line for line in captured.output))
+                for sn in ("serial-healthy", "serial-second"):
+                    self.assertEqual(
+                        self.plugin_module.Devices[sn].Units[plugin.outputPowerUnit].sValue,
+                        "1497.0;25687500.0",
+                    )
+                self.assertEqual(len(calls), 7 if failed_endpoint == "telemetry" else 8)
+
+    def test_successful_optional_readings_do_not_overwrite_missing_sensors(self):
+        plugin = self.plugin_module._plugin
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.getWebInverterDevices = Mock(return_value=[{"sn": "serial-1", "status": 5, "name": "inverter"}])
+        account.getWebInverterTelemetry = Mock(return_value={"tempperature": 31.5})
+        account.getWebInverterTelecounting = Mock(return_value={"etotal": 12.5})
+        plugin.goodWeAccount = account
+        plugin.createDevices("serial-1")
+        units = self.plugin_module.Devices["serial-1"].Units
+        for unit in units.values():
+            unit.sValue = "previous"
+        units[plugin.outputPowerUnit].sValue = "800;12500"
+        before = {number: unit.sValue for number, unit in units.items()}
+        data = account.getWebData("station-uuid")
+        account.createStationV2(data, "station-uuid")
+        plugin.updateDevices(data, "station-uuid")
+        self.assertEqual(units[plugin.inverterTemperatureUnit].sValue, "31.5")
+        for number, value in before.items():
+            if number != plugin.inverterTemperatureUnit:
+                self.assertEqual(units[number].sValue, value)
+                self.assertEqual(units[number].update_called, 0)
+
+    def test_incomplete_three_phase_sample_does_not_fabricate_missing_phase(self):
+        plugin = self.plugin_module._plugin
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.getWebInverterDevices = Mock(return_value=[{"sn": "serial-1", "status": 0, "name": "inverter"}])
+        account.getWebInverterTelemetry = Mock(return_value={
+            "output_current_a": 8.1, "output_current_b": 8.7,
+            "output_power": -1400, "tempperature": 31.5,
+        })
+        account.getWebInverterTelecounting = Mock(return_value={"etotal": 12.5})
+        plugin.goodWeAccount = account
+        data = account.getWebData("station-uuid")
+        account.createStationV2(data, "station-uuid")
+        plugin.createDevices("serial-1", data["inverter"][0])
+        unit = self.plugin_module.Devices["serial-1"].Units[plugin.outputCurrent3PhaseUnit]
+        unit.sValue = "7.0;8.0;9.0;"
+        plugin.updateDevices(data, "station-uuid")
+        self.assertEqual(unit.sValue, "7.0;8.0;9.0;")
+        self.assertEqual(unit.update_called, 0)
+        self.assertEqual(self.plugin_module.Devices["serial-1"].Units[plugin.outputPowerUnit].sValue, "-1400;12500.0")
+
+    def test_station_schema_failure_does_not_block_next_station(self):
+        plugin = self.plugin_module._plugin
+        account = Mock(tokenAvailable=True, powerStationList={})
+        account.powerStationListRequest.return_value = {"dataList": [{"id": "bad"}, {"id": "good"}]}
+        account.stationDataRequestV2.side_effect = [
+            exceptions.GoodweException("invalid device list"), {"inverter": []},
+        ]
+        plugin.goodWeAccount = account
+        plugin.updateDevices = Mock()
+        self.plugin_module.Parameters["Mode1"] = ""
+        plugin.startDeviceUpdateV2()
+        plugin.updateDevices.assert_called_once_with({"inverter": []}, "good")
+
 
 class GoodWeExceptionsTest(unittest.TestCase):
     def test_exception_hierarchy_preserves_messages(self):
@@ -575,7 +690,7 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         self.assertEqual(result["inverter"][0]["status"], 1)
         self.assertEqual(account.INVERTER_STATE[result["inverter"][0]["status"]], "generating")
 
-    def test_empty_telemetry_and_counters_return_plugin_safe_station_data(self):
+    def test_empty_telemetry_and_counters_skip_inverter_without_fabricating_zeros(self):
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
         account.getWebInverterDevices = lambda station_id: [{
             "sn": "54200DSN196R0358",
@@ -586,19 +701,8 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         account.getWebInverterTelemetry = lambda station_id, serial_number, device_type: {}
         account.getWebInverterTelecounting = lambda station_id, serial_number, device_type: {}
 
-        result = account.getWebData("station-uuid")
-        station = PowerStation(stationData=result)
-        inverter = result["inverter"][0]
-
-        self.assertEqual(result["info"]["powerstation_id"], "station-uuid")
-        self.assertEqual(station.id, "station-uuid")
-        self.assertEqual(inverter["status"], 0)
-        self.assertEqual(inverter["output_current"], 0)
-        self.assertEqual(inverter["output_voltage"], 0)
-        self.assertEqual(inverter["output_power"], 0)
-        self.assertEqual(inverter["etotal"], 0)
-        self.assertEqual(inverter["pv_input_1"], "0V/0A")
-        self.assertIn("fac1", inverter["d"])
+        with self.assertRaisesRegex(exceptions.GoodweException, "No valid inverter readings"):
+            account.getWebData("station-uuid")
 
 
 class GoodWeSemsWebApiTest(unittest.TestCase):
@@ -722,7 +826,7 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.assertEqual(telemetry["output_current_b"], 8.7)
         self.assertEqual(telemetry["output_current_c"], 8.3)
 
-    def test_web_telemetry_preserves_unparseable_factor_values_safely(self):
+    def test_web_telemetry_omits_unparseable_factor_values(self):
         payload = {"data": [None, {"factors": [
             None,
             {"code": 10, "data": "ignored"},
@@ -734,19 +838,20 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             {"code": "PHASE-A:Iac", "data": "bad-phase-current"},
             {"code": "MPPT-1:Vpv", "data": "bad-v"},
             {"code": "MPPT-1:Ipv", "data": "bad-a"},
+            {"code": "Vac2", "data": 231.0},
         ]}]}
 
         with patch("GoodWe.requests.get", return_value=make_response(payload)):
             telemetry = self.account.getWebInverterTelemetry("station-uuid", "serial-1")
 
-        self.assertEqual(telemetry["d"]["fac1"], "unknown")
+        self.assertEqual(telemetry["d"], {})
         self.assertNotIn("tempperature", telemetry)
         self.assertNotIn("output_power", telemetry)
-        self.assertNotIn("output_voltage", telemetry)
+        self.assertEqual(telemetry["output_voltage"], 231.0)
         self.assertNotIn("output_current", telemetry)
-        self.assertEqual(telemetry["pv_input_1"], "bad-v/bad-a")
+        self.assertNotIn("pv_input_1", telemetry)
 
-    def test_web_telecounting_maps_energy_counters_and_preserves_unparseable_values(self):
+    def test_web_telecounting_maps_energy_counters_and_omits_unparseable_values(self):
         payload = {"data": [{"factors": [
             {"code": "proPvStatsToday", "data": "3.2"},
             {"code": "proPvStatsTotal", "data": "1200.5"},
@@ -757,25 +862,35 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         ]}]}
         response = make_response(payload)
 
-        with patch("GoodWe.requests.get", return_value=response):
+        with patch("GoodWe.requests.get", return_value=response) as get:
             counters = self.account.getWebInverterTelecounting("station-uuid", "serial-1")
 
         self.assertEqual(counters, {
             "eday": 3.2,
             "etotal": 1200.5,
-            "eweek": "bad-value",
             "thismonthetotle": 31.0,
             "eyear": 400.0,
         })
+        self.assertEqual(
+            get.call_args.args[0],
+            "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/equipments/serial-1/telecounting?deviceType=INVERTER&pwId=station-uuid",
+        )
+        self.assertEqual(get.call_args.kwargs["timeout"], 10)
+        self.assertIn("X-Signature", get.call_args.kwargs["headers"])
 
-    def test_web_request_failures_return_empty_results(self):
+    def test_web_request_failures_propagate_instead_of_returning_empty_results(self):
         timeout = goodwe_module.requests.exceptions.Timeout("offline")
         self.account.tokenRequest = Mock()
         with patch("GoodWe.requests.get", side_effect=timeout):
-            self.assertEqual(self.account.getWebInverterDevices("station-uuid"), [])
-            self.assertEqual(self.account.getWebInverterTelemetry("station-uuid", "serial-1"), {})
-            self.assertEqual(self.account.getWebInverterTelecounting("station-uuid", "serial-1"), {})
-            self.account.getWebData("station-uuid")
+            for method, args in (
+                (self.account.getWebInverterDevices, ("station-uuid",)),
+                (self.account.getWebInverterTelemetry, ("station-uuid", "serial-1")),
+                (self.account.getWebInverterTelecounting, ("station-uuid", "serial-1")),
+                (self.account.getWebData, ("station-uuid",)),
+            ):
+                with self.subTest(method=method.__name__):
+                    with self.assertRaises(goodwe_module.requests.exceptions.Timeout):
+                        method(*args)
         self.account.tokenRequest.assert_not_called()
 
     def test_empty_web_device_response_is_logged_at_debug_level(self):
@@ -812,8 +927,8 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
                 }
                 account.tokenAvailable = True
                 account.tokenRequest = Mock(side_effect=lambda: setattr(account, "tokenAvailable", True) or 200)
-                account.getWebInverterTelemetry = Mock(return_value={})
-                account.getWebInverterTelecounting = Mock(return_value={})
+                account.getWebInverterTelemetry = Mock(return_value={"output_power": 0})
+                account.getWebInverterTelecounting = Mock(return_value={"etotal": 12.5})
 
                 with patch("GoodWe.requests.get", side_effect=[first_response, successful_response]) as get:
                     result = account.getWebData("station-uuid")
@@ -833,7 +948,7 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             {"output_power": 800.0, "pv_input_1": "200V/4A", "pv_input_2": "201V/4A"},
             {"output_power": 0.0},
         ])
-        self.account.getWebInverterTelecounting = Mock(side_effect=[{"etotal": 12.5}, {}])
+        self.account.getWebInverterTelecounting = Mock(side_effect=[{"etotal": 12.5}, {"etotal": 0}])
 
         result = self.account.getWebData("station-uuid")
 
@@ -849,6 +964,107 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.account.getWebInverterTelemetry.assert_any_call(
             "station-uuid", "serial-2", "ENERGY_STORAGE_INTEGRATED_CABINET"
         )
+
+    def test_web_responses_reject_api_errors_empty_and_malformed_data(self):
+        payloads = (
+            {"code": "S9999", "msg": "server failed"},
+            {"code": []},
+            {"code": False, "data": []},
+            {"code": "C0602", "msg": "session expired"},
+            {"code": "00000", "data": None},
+            {"data": {}},
+            {"data": []},
+            {"data": [{"factors": None}]},
+            {"data": [{"factors": []}]},
+            "invalid envelope",
+        )
+        for method in (self.account.getWebInverterTelemetry, self.account.getWebInverterTelecounting):
+            for payload in payloads:
+                with self.subTest(method=method.__name__, payload=payload):
+                    with patch("GoodWe.requests.get", return_value=make_response(payload)):
+                        with self.assertRaises(exceptions.GoodweException):
+                            method("station-uuid", "serial-1")
+
+    def test_web_responses_reject_invalid_json(self):
+        response = make_response(None)
+        response.json.side_effect = ValueError("not JSON")
+        with patch("GoodWe.requests.get", return_value=response):
+            with self.assertRaisesRegex(exceptions.GoodweException, "not valid JSON"):
+                self.account.getWebInverterDevices("station-uuid")
+
+    def test_device_response_rejects_api_errors_and_missing_list(self):
+        for payload in ({"code": "S9999"}, {"data": {}}, [], {"data": {"deviceDetailList": {}}}):
+            with self.subTest(payload=payload):
+                with patch("GoodWe.requests.get", return_value=make_response(payload)):
+                    with self.assertRaises(exceptions.GoodweException):
+                        self.account.getWebInverterDevices("station-uuid")
+
+    def test_empty_device_list_after_relogin_is_a_failed_poll(self):
+        self.account._refreshWebSession = Mock(return_value=True)
+        with patch("GoodWe.requests.get", return_value=make_response({"data": {"deviceDetailList": []}})):
+            with self.assertRaisesRegex(exceptions.GoodweException, "no supported devices"):
+                self.account.getWebData("station-uuid")
+        self.account._refreshWebSession.assert_called_once_with()
+
+    def test_all_status_502_uses_bounded_station_retries(self):
+        response = make_response(None)
+        response.raise_for_status.side_effect = goodwe_module.requests.exceptions.HTTPError("502 Bad Gateway")
+        self.account._refreshWebSession = Mock()
+        with patch("GoodWe.requests.get", return_value=response) as get, patch("GoodWe.time.sleep"):
+            with self.assertRaises(exceptions.TooManyRetries):
+                self.account.stationDataRequestV2("station-uuid")
+        self.assertEqual(get.call_count, 3)
+        self.account._refreshWebSession.assert_not_called()
+
+    def test_numeric_zero_and_negative_power_are_preserved(self):
+        payload = [{"factors": [
+            {"code": "Temperature", "data": 0},
+            {"code": "Fac", "data": 0},
+            {"code": "pAc", "data": -1.4},
+            {"code": "Vac", "data": 0},
+            {"code": "Iac", "data": 0},
+            {"code": "MPPT-1:Vpv", "data": 0},
+            {"code": "MPPT-1:Ipv", "data": 0},
+        ]}]
+        with patch("GoodWe.requests.get", return_value=make_response(payload)):
+            result = self.account.getWebInverterTelemetry("station-uuid", "serial-1")
+        self.assertEqual(result["output_power"], -1400)
+        self.assertEqual(result["tempperature"], 0)
+        self.assertEqual(result["output_current"], 0)
+        self.assertEqual(result["output_voltage"], 0)
+        self.assertEqual(result["d"]["fac1"], 0)
+        self.assertEqual(result["pv_input_1"], "0.0V/0.0A")
+
+    def test_nonfinite_and_unusable_measurements_reject_inverter(self):
+        for value in ("nan", "inf", "-inf", "bad-value", True):
+            with self.subTest(value=value):
+                with patch("GoodWe.requests.get", return_value=make_response([{"factors": [
+                    {"code": "pAc", "data": value},
+                ]}])):
+                    with self.assertRaises(exceptions.GoodweException):
+                        self.account.getWebInverterTelemetry("station-uuid", "serial-1")
+                with patch("GoodWe.requests.get", return_value=make_response([{"factors": [
+                    {"code": "proPvStatsTotal", "data": value},
+                ]}])):
+                    with self.assertRaises(exceptions.GoodweException):
+                        self.account.getWebInverterTelecounting("station-uuid", "serial-1")
+
+    def test_unknown_status_without_live_power_is_not_inferred_as_waiting(self):
+        self.account.getWebInverterDevices = Mock(return_value=[{"sn": "serial-1", "status": 5}])
+        self.account.getWebInverterTelemetry = Mock(return_value={"tempperature": 32.0})
+        self.account.getWebInverterTelecounting = Mock(return_value={"etotal": 12.5})
+        result = self.account.getWebData("station-uuid")["inverter"][0]
+        self.assertNotIn("status", result)
+        for field in ("output_power", "output_voltage", "output_current", "pv_input_1"):
+            self.assertNotIn(field, result)
+        self.assertEqual(result["d"], {})
+
+    def test_mismatched_telemetry_serial_cannot_update_another_inverter(self):
+        self.account.getWebInverterDevices = Mock(return_value=[{"sn": "serial-1", "status": 1}])
+        self.account.getWebInverterTelemetry = Mock(return_value={"sn": "serial-other", "output_power": 800})
+        self.account.getWebInverterTelecounting = Mock(return_value={"etotal": 12.5})
+        with self.assertRaisesRegex(exceptions.GoodweException, "No valid inverter readings"):
+            self.account.getWebData("station-uuid")
 
 class GoodWeSemsAuthenticationFailureTest(unittest.TestCase):
     def test_failed_new_login_does_not_fall_back_to_legacy_login(self):
