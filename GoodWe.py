@@ -32,6 +32,7 @@ import logging
 import hashlib
 import base64
 import uuid
+import math
 from urllib.parse import urlsplit
 
 NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
@@ -476,43 +477,75 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             return None
 
     def _flatten_web_factors(self, response):
+        if not isinstance(response, list):
+            raise exceptions.GoodweException("SEMS+ factors response must be a list")
         factors = {}
         for group in response or []:
             if not isinstance(group, dict):
                 continue
-            for factor in group.get("factors", []):
+            if not isinstance(group.get("factors"), list):
+                raise exceptions.GoodweException("SEMS+ response is missing a factors list")
+            for factor in group["factors"]:
                 if not isinstance(factor, dict) or factor.get("data") is None:
                     continue
                 code = factor.get("code")
                 if isinstance(code, str):
                     factors[code] = factor.get("data")
+        if not factors:
+            raise exceptions.GoodweException("SEMS+ response contains no measurements")
         return factors
 
-    def getWebInverterDevices(self, powerStationId):
-        self._webDeviceListRequiresRelogin = False
-        url_part = f"/sems-plant/api/stations/device/all-status?stationId={powerStationId}"
+    def _getWebResponse(self, url_part):
         api_base = self.base_url.rstrip("/")
         headers = self.apiRequestHeadersV2()
-        # add X-Signature for web token
         if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
             sig = self._generate_signature(self.token)
             if sig:
                 headers["X-Signature"] = sig
+        response = requests.get(api_base + url_part, headers=headers, timeout=10)
+        response.raise_for_status()
         try:
-            r = requests.get(api_base + url_part, headers=headers, timeout=10)
-            r.raise_for_status()
-            json_response = r.json()
-        except Exception as exp:
-            logging.error("getWebInverterDevices request failed: %s", exp)
-            Domoticz.Error("getWebInverterDevices request failed: " + str(exp))
-            return []
+            return response, response.json()
+        except ValueError as exp:
+            raise exceptions.GoodweException("SEMS+ response was not valid JSON") from exp
+
+    def _webResponseData(self, response):
+        if isinstance(response, dict):
+            code = response.get("code")
+            if "code" in response and (
+                not isinstance(code, (str, int)) or isinstance(code, bool) or code not in _SuccessCodes
+            ):
+                raise exceptions.GoodweException(
+                    "SEMS+ request failed: " + str(response.get("msg") or response.get("description") or response["code"])
+                )
+            return response.get("data")
+        return response
+
+    def _webNumber(self, value, field):
+        if value is None:
+            return None
+        try:
+            number = float(value)
+            if isinstance(value, bool) or not math.isfinite(number):
+                raise ValueError("not a finite measurement")
+            return number
+        except (TypeError, ValueError):
+            logging.warning("Ignoring invalid SEMS+ measurement '%s': %r", field, value)
+            return None
+
+    def getWebInverterDevices(self, powerStationId):
+        self._webDeviceListRequiresRelogin = False
+        url_part = f"/sems-plant/api/stations/device/all-status?stationId={powerStationId}"
+        r, json_response = self._getWebResponse(url_part)
 
         if isinstance(json_response, dict) and str(json_response.get("code", "")).upper() == "C0602":
             self._webDeviceListRequiresRelogin = True
             logging.debug("SEMS+ all-status returned C0602 (HTTP %s); response body: %s", r.status_code, r.text)
             return []
 
-        result = json_response.get("data") if isinstance(json_response, dict) else None
+        result = self._webResponseData(json_response)
+        if not isinstance(result, dict) or not isinstance(result.get("deviceDetailList"), list):
+            raise exceptions.GoodweException("SEMS+ all-status response is missing a deviceDetailList")
         devices = []
         for device_group in (result.get("deviceDetailList", []) if isinstance(result, dict) else []):
             if not isinstance(device_group, dict):
@@ -547,55 +580,33 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
 
     def getWebInverterTelemetry(self, powerStationId, serialNumber, device_type="INVERTER"):
         url_part = f"/sems-plant/api/equipments/{serialNumber}/telemetry?deviceType={device_type}&pwId={powerStationId}"
-        api_base = self.base_url.rstrip("/")
-        headers = self.apiRequestHeadersV2()
-        if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
-            sig = self._generate_signature(self.token)
-            if sig:
-                headers["X-Signature"] = sig
-        try:
-            r = requests.get(api_base + url_part, headers=headers, timeout=10)
-            r.raise_for_status()
-            json_response = r.json()
-        except Exception as exp:
-            logging.error("getWebInverterTelemetry request failed: %s", exp)
-            Domoticz.Error("getWebInverterTelemetry request failed: " + str(exp))
-            return {}
-
-        factors = self._flatten_web_factors(json_response if isinstance(json_response, list) or isinstance(json_response, dict) and json_response.get("data") is None else json_response.get("data", json_response))
+        _, json_response = self._getWebResponse(url_part)
+        factors = self._flatten_web_factors(self._webResponseData(json_response))
         telemetry = {}
         # basic mappings used by plugin
         if isinstance(factors.get("sn"), str):
             telemetry["sn"] = factors.get("sn")
-        if (v := factors.get("Temperature")) is not None:
-            try:
-                telemetry["tempperature"] = float(v)
-            except Exception:
-                pass
+        if (v := self._webNumber(factors.get("Temperature"), "Temperature")) is not None:
+            telemetry["tempperature"] = v
         # frequency
-        fac = factors.get("Fac") or factors.get("fac")
+        fac = self._webNumber(factors.get("Fac", factors.get("fac")), "Fac")
         telemetry.setdefault("d", {})
         if fac is not None:
-            try:
-                telemetry["d"]["fac1"] = float(fac)
-            except Exception:
-                telemetry["d"]["fac1"] = fac
+            telemetry["d"]["fac1"] = fac
         # AC values
-        if (v := factors.get("pAc")) is not None:
-            try:
-                telemetry["output_power"] = float(v) * 1000
-            except Exception:
-                pass
+        if (v := self._webNumber(factors.get("pAc"), "pAc")) is not None:
+            power = self._webNumber(v * 1000, "output_power")
+            if power is not None:
+                telemetry["output_power"] = power
         def parse_numeric_values(raw):
             if raw is None:
                 return []
             values = raw if isinstance(raw, (list, tuple)) else str(raw).replace("/", ",").split(",")
             parsed = []
             for item in values:
-                try:
-                    parsed.append(float(str(item).strip()))
-                except (TypeError, ValueError):
-                    continue
+                number = self._webNumber(item, "AC voltage/current")
+                if number is not None:
+                    parsed.append(number)
             return parsed
 
         voltage_by_phase = {}
@@ -612,7 +623,7 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
 
         primary_voltage = voltage_by_phase.get("a")
         if primary_voltage is None:
-            generic_voltage = parse_numeric_values(factors.get("Vac") or factors.get("vac"))
+            generic_voltage = parse_numeric_values(factors.get("Vac", factors.get("vac")))
             primary_voltage = max(generic_voltage) if generic_voltage else next(
                 (voltage_by_phase[phase] for phase in ("b", "c") if phase in voltage_by_phase),
                 None,
@@ -634,7 +645,7 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
                 else:
                     telemetry[f"output_current_{phase}"] = max(values)
 
-        generic_current = parse_numeric_values(factors.get("Iac") or factors.get("iac"))
+        generic_current = parse_numeric_values(factors.get("Iac", factors.get("iac")))
         primary_current = current_by_phase.get("a")
         if primary_current is None:
             primary_current = max(generic_current) if generic_current else None
@@ -642,43 +653,25 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             telemetry["output_current"] = primary_current
         # MPPT inputs
         for idx in range(1, 5):
-            vp = factors.get(f"MPPT-{idx}:Vpv") or factors.get(f"Vpv{idx}")
-            ip = factors.get(f"MPPT-{idx}:Ipv") or factors.get(f"Ipv{idx}")
+            vp = self._webNumber(factors.get(f"MPPT-{idx}:Vpv", factors.get(f"Vpv{idx}")), f"Vpv{idx}")
+            ip = self._webNumber(factors.get(f"MPPT-{idx}:Ipv", factors.get(f"Ipv{idx}")), f"Ipv{idx}")
             if vp is not None and ip is not None:
-                try:
-                    vp_f = float(vp)
-                    ip_f = float(ip)
-                    telemetry[f"pv_input_{idx}"] = "{:.1f}V/{:.1f}A".format(vp_f, ip_f)
-                except Exception:
-                    telemetry[f"pv_input_{idx}"] = f"{vp}/{ip}"
+                telemetry[f"pv_input_{idx}"] = "{:.1f}V/{:.1f}A".format(vp, ip)
+        if not any(key not in ("sn", "d") for key in telemetry) and not telemetry["d"]:
+            raise exceptions.GoodweException("SEMS+ telemetry contains no usable measurements")
         return telemetry
 
     def getWebInverterTelecounting(self, powerStationId, serialNumber, device_type="INVERTER"):
         url_part = f"/sems-plant/api/equipments/{serialNumber}/telecounting?deviceType={device_type}&pwId={powerStationId}"
-        api_base = self.base_url.rstrip("/")
-        headers = self.apiRequestHeadersV2()
-        if isinstance(self.token, dict) and self.token.get("client") == "semsPlusWeb":
-            sig = self._generate_signature(self.token)
-            if sig:
-                headers["X-Signature"] = sig
-        try:
-            r = requests.get(api_base + url_part, headers=headers, timeout=10)
-            r.raise_for_status()
-            json_response = r.json()
-        except Exception as exp:
-            logging.error("getWebInverterTelecounting request failed: %s", exp)
-            Domoticz.Error("getWebInverterTelecounting request failed: " + str(exp))
-            return {}
-
-        factors = self._flatten_web_factors(json_response if isinstance(json_response, list) or isinstance(json_response, dict) and json_response.get("data") is None else json_response.get("data", json_response))
+        _, json_response = self._getWebResponse(url_part)
+        factors = self._flatten_web_factors(self._webResponseData(json_response))
         counters = {}
         mapping = (("proPvStatsToday", "eday"), ("proPvStatsTotal", "etotal"), ("proPvStatsWeek", "eweek"), ("proPvStatsMonth", "thismonthetotle"), ("proPvStatsYear", "eyear"))
         for src, tgt in mapping:
-            if (v := factors.get(src)) is not None:
-                try:
-                    counters[tgt] = float(v)
-                except Exception:
-                    counters[tgt] = v
+            if (v := self._webNumber(factors.get(src), src)) is not None:
+                counters[tgt] = v
+        if "etotal" not in counters:
+            raise exceptions.GoodweException("SEMS+ telecounting is missing a valid total energy counter")
         return counters
 
     def getWebData(self, powerStationId):
@@ -689,13 +682,26 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             logging.info("SEMS+ all-status returned no devices; refreshing the session and retrying once")
             if self._refreshWebSession():
                 devices = self.getWebInverterDevices(powerStationId)
+        if not devices:
+            raise exceptions.GoodweException("SEMS+ all-status returned no supported devices after session recovery")
         for device in devices:
-            sn = device.get("sn") or device.get("sn")
-            if not isinstance(sn, str):
+            sn = device.get("sn")
+            if not isinstance(sn, str) or not sn.strip():
+                logging.error("Skipping SEMS+ device without a serial number at station '%s'", powerStationId)
                 continue
             device_type = device.get("deviceType", "INVERTER")
-            telemetry = self.getWebInverterTelemetry(powerStationId, sn, device_type)
-            counters = self.getWebInverterTelecounting(powerStationId, sn, device_type)
+            try:
+                telemetry = self.getWebInverterTelemetry(powerStationId, sn, device_type)
+                counters = self.getWebInverterTelecounting(powerStationId, sn, device_type)
+                if not telemetry or counters.get("etotal") is None:
+                    raise exceptions.GoodweException("Incomplete SEMS+ telemetry or energy counters")
+                if telemetry.get("sn", sn) != sn:
+                    raise exceptions.GoodweException("SEMS+ telemetry serial number does not match the requested inverter")
+            except (requests.exceptions.RequestException, exceptions.GoodweException) as exp:
+                message = "Skipping update for inverter '%s' at station '%s': %s" % (sn, powerStationId, exp)
+                logging.error(message)
+                Domoticz.Error(message)
+                continue
             inverter = {}
             inverter.update(device)
             inverter.update(telemetry)
@@ -703,19 +709,13 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             # Normalize fields expected by legacy code
             # plugin expects keys like 'sn','status','fault_message','tempperature','d','output_current','output_voltage','output_power','etotal','pv_input_1'
             inverter.setdefault('fault_message', '')
-            inverter.setdefault('status', device.get('status', 0))
-            if inverter['status'] not in self.INVERTER_STATE:
-                try:
-                    inverter['status'] = 1 if float(inverter.get('output_power', 0)) > 0 else 0
-                except (TypeError, ValueError):
-                    inverter['status'] = 0
-            for field in ('tempperature', 'output_current', 'output_voltage', 'output_power', 'etotal'):
-                if inverter.get(field) is None:
-                    inverter[field] = 0
+            status = inverter.get('status')
+            if not isinstance(status, (int, float)) or isinstance(status, bool) or status not in self.INVERTER_STATE:
+                inverter.pop('status', None)
+                if telemetry.get('output_power') is not None:
+                    inverter['status'] = 1 if telemetry['output_power'] > 0 else 0
             if not isinstance(inverter.get('d'), dict):
                 inverter['d'] = {}
-            inverter['d'].setdefault('fac1', 0)
-            inverter.setdefault('pv_input_1', '0V/0A')
             for field in ('battery', 'bms_status', 'battery_power'):
                 inverter.setdefault(field, '')
             # map pv inputs
@@ -729,6 +729,10 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
                 inverter['pv_input_4'] = telemetry.get('pv_input_4')
             # counters may have etotal in kWh; leave as-is
             inverters.append(inverter)
+        if not inverters:
+            raise exceptions.GoodweException(
+                "No valid inverter readings for SEMS+ station '%s'; keeping previous Domoticz values" % powerStationId
+            )
         return {
             'info': {
                 'powerstation_id': powerStationId,
