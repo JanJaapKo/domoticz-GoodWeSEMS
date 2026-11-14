@@ -690,10 +690,21 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
                 logging.error("Skipping SEMS+ device without a serial number at station '%s'", powerStationId)
                 continue
             device_type = device.get("deviceType", "INVERTER")
+            non_producing = self.INVERTER_STATE.get(device.get("status")) in ("offline", "waiting")
             try:
-                telemetry = self.getWebInverterTelemetry(powerStationId, sn, device_type)
-                counters = self.getWebInverterTelecounting(powerStationId, sn, device_type)
-                if not telemetry or counters.get("etotal") is None:
+                try:
+                    telemetry = self.getWebInverterTelemetry(powerStationId, sn, device_type)
+                except exceptions.GoodweException as exp:
+                    if not non_producing or str(exp) != "SEMS+ telemetry contains no usable measurements":
+                        raise
+                    telemetry = {}
+                try:
+                    counters = self.getWebInverterTelecounting(powerStationId, sn, device_type)
+                except exceptions.GoodweException as exp:
+                    if not non_producing or str(exp) != "SEMS+ telecounting is missing a valid total energy counter":
+                        raise
+                    counters = {}
+                if (not telemetry or counters.get("etotal") is None) and not non_producing:
                     raise exceptions.GoodweException("Incomplete SEMS+ telemetry or energy counters")
                 if telemetry.get("sn", sn) != sn:
                     raise exceptions.GoodweException("SEMS+ telemetry serial number does not match the requested inverter")
@@ -706,6 +717,8 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             inverter.update(device)
             inverter.update(telemetry)
             inverter.update(counters)
+            if non_producing and inverter.get("etotal") == 0:
+                inverter.pop("etotal")
             # Normalize fields expected by legacy code
             # plugin expects keys like 'sn','status','fault_message','tempperature','d','output_current','output_voltage','output_power','etotal','pv_input_1'
             inverter.setdefault('fault_message', '')

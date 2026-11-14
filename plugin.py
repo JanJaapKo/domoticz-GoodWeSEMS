@@ -17,12 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.2.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.3.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
         <p>The retired legacy SEMS API is no longer supported.</p>
-        <p>Version: 6.2.0</p>
+        <p>Version: 6.3.0</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -244,15 +244,6 @@ class GoodWeSEMSPlugin:
                     )
                 except (KeyError, IndexError, ValueError, AttributeError):
                     currentEnergyCounter = 0
-                if inverter.get("etotal") is None or (inverter["etotal"] <= 0 and currentEnergyCounter > 0):
-                    logging.warning(
-                        "Skipping update for inverter '%s': empty SEMS+ record (etotal %s, previous energy counter %s)",
-                        inverter["sn"],
-                        inverter.get("etotal"),
-                        currentEnergyCounter,
-                    )
-                    continue
-
                 if len(inverter['fault_message']) > 0:
                     Domoticz.Log("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
                     logging.info("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
@@ -260,12 +251,11 @@ class GoodWeSEMSPlugin:
                 if status in self.goodWeAccount.INVERTER_STATE:
                     Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(status) + ' ' + self.goodWeAccount.INVERTER_STATE[status] + "'")
                     logging.info("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(status) + ' ' + self.goodWeAccount.INVERTER_STATE[status] + "'")
-                    UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, status+1, str((status+2)*10), AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, status+1, str((status+2)*10))
                 if inverter.get("tempperature") is not None:
                     UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
                 if self.goodWeAccount.INVERTER_STATE.get(status) == 'generating' and inverter.get("d", {}).get("fac1") is not None:
                     UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
-
                 for field, unit in (
                     ("output_current", theInverter.outputCurrentUnit),
                     ("output_voltage", theInverter.outputVoltageUnit),
@@ -288,7 +278,12 @@ class GoodWeSEMSPlugin:
                             AlwaysUpdate=True,
                         )
                 if inverter.get("output_power") is not None:
-                    outputPowerValue = str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000)
+                    etotal = inverter.get("etotal")
+                    if etotal is None or (etotal <= 0 and currentEnergyCounter > 0):
+                        energyCounter = currentEnergyCounter
+                    else:
+                        energyCounter = etotal * 1000
+                    outputPowerValue = str(inverter["output_power"]) + ";" + str(energyCounter)
                     UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue, AlwaysUpdate=True)
                 for idx in range(1, 5):
                     pv_input = inverter.get("pv_input_" + str(idx))
@@ -304,8 +299,8 @@ class GoodWeSEMSPlugin:
                     newCounter = calculateNewEnergy(inverter["sn"], powerUnit, inputPower)
                     UpdateDevice(inverter["sn"], powerUnit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
                 #log data of battery
-                Domoticz.Debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
-                logging.debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
+                Domoticz.Debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter.get("battery", ""),inverter.get("bms_status", ""),inverter.get("battery_power", "")))
+                logging.debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter.get("battery", ""),inverter.get("bms_status", ""),inverter.get("battery_power", "")))
 
     def createDevices(self, serialNumber, inverterData=None):
         #create domoticz devices

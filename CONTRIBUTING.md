@@ -23,6 +23,7 @@ python -m compileall -q GoodWe.py plugin.py exceptions.py fakeDomoticz.py
 - For API changes, test request URL, payload, headers, regional host selection, and error responses with mocked HTTP calls. Cover incomplete or empty telemetry where it affects Domoticz-facing data.
 - For plugin changes, use the fake Domoticz host to cover station discovery and persistence, missing station IDs, device creation/update behavior, heartbeat scheduling, and protection against suspicious zero energy-counter resets when relevant.
 - Keep tests deterministic and offline. Mock network calls; do not commit credentials, account data, or live-service dependencies.
+- The regression suite checks that a feature branch increases the major or minor plugin version over its PR base (or `master` on branch pushes), and that the displayed version matches the plugin descriptor.
 - Keep plugin-facing station and inverter data safe for incomplete API responses. The plugin supports SEMS+ only; do not add legacy SEMS endpoint fallbacks.
 - Update the README or plugin configuration documentation when user-visible behavior, setup, or limitations change. Update the plugin version for a release as appropriate.
 

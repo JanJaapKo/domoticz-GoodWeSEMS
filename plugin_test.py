@@ -2,6 +2,10 @@ import unittest
 import base64
 import hashlib
 import json
+import os
+import re
+import subprocess
+from pathlib import Path
 import GoodWe as goodwe_module
 from unittest.mock import Mock, patch
 from GoodWe import GoodWeSEMSPlus
@@ -20,6 +24,112 @@ def make_response(payload, url="https://example.test/api"):
     response.text = json.dumps(payload)
     response.json.return_value = payload
     return response
+
+
+class PluginVersionTest(unittest.TestCase):
+    def setUp(self):
+        self.plugin_source = Path(__file__).with_name("plugin.py").read_text(
+            encoding="utf-8"
+        )
+        self.version_match = re.search(
+            r'<plugin\b[^>]*\bversion="(\d+\.\d+\.\d+)"', self.plugin_source
+        )
+        self.assertIsNotNone(self.version_match, "Plugin descriptor version is missing")
+
+    def test_descriptor_and_displayed_versions_match(self):
+        displayed_version = re.search(
+            r"<p>Version: (\d+\.\d+\.\d+)</p>", self.plugin_source
+        )
+        self.assertIsNotNone(displayed_version, "Displayed plugin version is missing")
+        self.assertEqual(self.version_match.group(1), displayed_version.group(1))
+
+    def test_feature_branch_check_uses_remote_merge_base(self):
+        major, minor, _ = map(int, self.version_match.group(1).split("."))
+        base_version = (
+            f"{major}.{minor - 1}.0" if minor else f"{major - 1}.0.0"
+        )
+        base_source = re.sub(
+            r'(<plugin\b[^>]*\bversion=")\d+\.\d+\.\d+(")',
+            rf"\g<1>{base_version}\2",
+            self.plugin_source,
+            count=1,
+        )
+        command_results = [
+            subprocess.CompletedProcess([], 128, "", "unknown revision"),
+            subprocess.CompletedProcess([], 0, "branch-point\n", ""),
+            subprocess.CompletedProcess([], 0, base_source, ""),
+        ]
+        with patch.dict(os.environ, {"GITHUB_BASE_REF": "master"}):
+            with patch.object(
+                subprocess, "run", side_effect=command_results
+            ) as run:
+                self.test_feature_branch_increases_major_or_minor_version()
+
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["git", "merge-base", "HEAD", "master"],
+                ["git", "merge-base", "HEAD", "origin/master"],
+                ["git", "show", "branch-point:plugin.py"],
+            ],
+        )
+
+    def test_feature_branch_increases_major_or_minor_version(self):
+        base_ref = os.environ.get("GITHUB_BASE_REF")
+        if not base_ref:
+            branch = os.environ.get("GITHUB_REF_NAME")
+            if not branch:
+                branch = subprocess.run(
+                    ["git", "branch", "--show-current"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            if branch == "master":
+                self.skipTest("The default branch has no feature-branch version bump")
+            base_ref = "master"
+
+        base_refs = [base_ref]
+        if not base_ref.startswith("origin/"):
+            base_refs.append(f"origin/{base_ref}")
+
+        base_commit = None
+        for ref in base_refs:
+            result = subprocess.run(
+                ["git", "merge-base", "HEAD", ref],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                base_commit = result.stdout.strip()
+                base_ref = ref
+                break
+        self.assertIsNotNone(
+            base_commit,
+            f"Could not find merge base with {', '.join(base_refs)}",
+        )
+
+        base_source = subprocess.run(
+            ["git", "show", f"{base_commit}:plugin.py"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        base_version_match = re.search(
+            r'<plugin\b[^>]*\bversion="(\d+\.\d+\.\d+)"', base_source
+        )
+        self.assertIsNotNone(
+            base_version_match,
+            f"Plugin version is missing at merge base with {base_ref}",
+        )
+
+        current_version = tuple(map(int, self.version_match.group(1).split(".")))
+        base_version = tuple(map(int, base_version_match.group(1).split(".")))
+        self.assertGreater(
+            current_version[:2],
+            base_version[:2],
+            f"Feature branches must bump the major or minor version above {base_ref}",
+        )
 
 
 class BasicInverterTest(unittest.TestCase):
@@ -217,7 +327,7 @@ class PluginBehaviorTest(unittest.TestCase):
         manual_test.test_calculate_new_energy(self.plugin_module)
 
     def test_update_devices_protects_existing_energy_counter(self):
-        manual_test.test_update_devices_skips_zero_counter_reset(self.plugin_module)
+        manual_test.test_update_devices_preserves_energy_counter(self.plugin_module)
 
     def test_create_devices_adds_expected_units(self):
         manual_test.test_create_devices(self.plugin_module)
@@ -385,6 +495,85 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertNotIn(plugin.outputVoltageBUnit, units)
         self.assertNotIn(plugin.outputVoltageCUnit, units)
         self.assertNotIn(plugin.outputCurrent3PhaseUnit, units)
+
+    def test_update_devices_updates_offline_state_without_measurements(self):
+        plugin = self.plugin_module.GoodWeSEMSPlugin()
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.tokenAvailable = True
+        account.getWebInverterDevices = Mock(return_value=[{
+            "sn": "sn_offline",
+            "deviceType": "INVERTER",
+            "status": -1,
+        }])
+        account.getWebInverterTelemetry = Mock(
+            side_effect=exceptions.GoodweException(
+                "SEMS+ telemetry contains no usable measurements"
+            )
+        )
+        account.getWebInverterTelecounting = Mock(
+            side_effect=exceptions.GoodweException(
+                "SEMS+ telecounting is missing a valid total energy counter"
+            )
+        )
+        plugin.goodWeAccount = account
+        plugin.establishToken = Mock(return_value=True)
+        plugin.getPowerStationIds = Mock(return_value=["station-uuid"])
+        self.plugin_module.Devices = {}
+        plugin.createDevices("sn_offline")
+
+        units = self.plugin_module.Devices["sn_offline"].Units
+        state_unit = units[plugin.inverterStateUnit]
+        state_unit.nValue = 2
+        state_unit.sValue = "30"
+        output_unit = units[plugin.outputPowerUnit]
+        output_unit.sValue = "0;9066300.0"
+
+        with patch.object(self.plugin_module.Domoticz, "Error") as plugin_error:
+            with patch.object(goodwe_module.Domoticz, "Error") as api_error:
+                with self.assertNoLogs(level="ERROR"):
+                    plugin.startDeviceUpdateV2()
+
+        self.assertEqual((state_unit.nValue, state_unit.sValue), (0, "10"))
+        self.assertEqual(state_unit.update_called, 1)
+        self.assertEqual(output_unit.sValue, "0;9066300.0")
+        self.assertEqual(output_unit.update_called, 0)
+        plugin_error.assert_not_called()
+        api_error.assert_not_called()
+        account.getWebInverterTelemetry.assert_called_once_with(
+            "station-uuid", "sn_offline", "INVERTER"
+        )
+
+    def test_zero_pv_counter_keeps_battery_supported_power_reading(self):
+        plugin = self.plugin_module._plugin
+        station = PowerStation(stationData={
+            "info": {"powerstation_id": "station-uuid"},
+            "inverter": [{"sn": "sn_battery", "name": "hybrid inverter"}],
+        })
+        account = Mock()
+        account.powerStationList = {"station-uuid": station}
+        account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
+        plugin.goodWeAccount = account
+        self.plugin_module.Devices = {}
+        plugin.createDevices("sn_battery")
+
+        output_unit = self.plugin_module.Devices["sn_battery"].Units[
+            plugin.outputPowerUnit
+        ]
+        output_unit.sValue = "0;9066300.0"
+
+        plugin.updateDevices({"inverter": [{
+            "sn": "sn_battery",
+            "fault_message": "",
+            "status": 1,
+            "output_power": 500.0,
+            "etotal": 0,
+            "battery": 70,
+            "bms_status": 1,
+            "battery_power": 500,
+        }]}, "station-uuid")
+
+        self.assertEqual(output_unit.sValue, "500.0;9066300.0")
+        self.assertEqual(output_unit.update_called, 1)
 
     def test_update_devices_logs_temperature_for_offline_inverter(self):
         plugin = self.plugin_module._plugin
@@ -704,6 +893,38 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         with self.assertRaisesRegex(exceptions.GoodweException, "No valid inverter readings"):
             account.getWebData("station-uuid")
 
+    def test_non_producing_inverter_with_no_measurements_returns_status_only(self):
+        for status in (-1, 0):
+            with self.subTest(status=status):
+                account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+                account.getWebInverterDevices = Mock(return_value=[{
+                    "sn": "serial-non-producing",
+                    "deviceType": "INVERTER",
+                    "status": status,
+                }])
+                account.getWebInverterTelemetry = Mock(
+                    side_effect=exceptions.GoodweException(
+                        "SEMS+ telemetry contains no usable measurements"
+                    )
+                )
+                account.getWebInverterTelecounting = Mock(
+                    side_effect=exceptions.GoodweException(
+                        "SEMS+ telecounting is missing a valid total energy counter"
+                    )
+                )
+
+                with patch.object(goodwe_module.Domoticz, "Error") as domoticz_error:
+                    with patch.object(goodwe_module.logging, "error") as log_error:
+                        result = account.getWebData("station-uuid")
+
+                inverter = result["inverter"][0]
+                self.assertEqual(inverter["status"], status)
+                self.assertEqual(inverter["sn"], "serial-non-producing")
+                self.assertNotIn("output_power", inverter)
+                self.assertNotIn("etotal", inverter)
+                domoticz_error.assert_not_called()
+                log_error.assert_not_called()
+
 
 class GoodWeSemsWebApiTest(unittest.TestCase):
     def setUp(self):
@@ -907,7 +1128,11 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
     def test_empty_or_c0602_device_response_refreshes_session_and_retries_once(self):
         successful_response = make_response({"data": {"deviceDetailList": [
             {"deviceType": "INVERTER", "statusDetailList": [
-                {"snList": ["serial-1"], "detailMap": {"serial-1": {"sn": "serial-1"}}},
+                {
+                    "status": -1,
+                    "snList": ["serial-1"],
+                    "detailMap": {"serial-1": {"sn": "serial-1"}},
+                },
             ]},
         ]}})
         first_responses = [
@@ -941,7 +1166,7 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         devices = [
             {"sn": "serial-1", "deviceType": "INVERTER", "status": 1, "name": "inverter"},
             {"deviceType": "INVERTER", "status": 1},
-            {"sn": "serial-2", "deviceType": "ENERGY_STORAGE_INTEGRATED_CABINET", "status": 7},
+            {"sn": "serial-2", "deviceType": "ENERGY_STORAGE_INTEGRATED_CABINET", "status": -1},
         ]
         self.account.getWebInverterDevices = Mock(return_value=devices)
         self.account.getWebInverterTelemetry = Mock(side_effect=[
@@ -957,9 +1182,11 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.assertEqual(result["inverter"][0]["status"], 1)
         self.assertEqual(result["inverter"][0]["etotal"], 12.5)
         self.assertEqual(result["inverter"][0]["pv_input_2"], "201V/4A")
-        self.assertEqual(result["inverter"][1]["status"], 0)
+        self.assertEqual(result["inverter"][1]["status"], -1)
         self.assertEqual(result["inverter"][1]["fault_message"], "")
         self.assertEqual(result["inverter"][1]["battery"], "")
+        self.assertEqual(result["inverter"][1]["output_power"], 0.0)
+        self.assertNotIn("etotal", result["inverter"][1])
         self.assertEqual(self.account.getWebInverterTelemetry.call_count, 2)
         self.account.getWebInverterTelemetry.assert_any_call(
             "station-uuid", "serial-2", "ENERGY_STORAGE_INTEGRATED_CABINET"
