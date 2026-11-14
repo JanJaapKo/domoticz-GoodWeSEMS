@@ -43,7 +43,7 @@ class PluginVersionTest(unittest.TestCase):
         self.assertIsNotNone(displayed_version, "Displayed plugin version is missing")
         self.assertEqual(self.version_match.group(1), displayed_version.group(1))
 
-    def test_feature_branch_check_uses_remote_tracking_base(self):
+    def test_feature_branch_check_uses_remote_merge_base(self):
         major, minor, _ = map(int, self.version_match.group(1).split("."))
         base_version = (
             f"{major}.{minor - 1}.0" if minor else f"{major - 1}.0.0"
@@ -56,6 +56,7 @@ class PluginVersionTest(unittest.TestCase):
         )
         command_results = [
             subprocess.CompletedProcess([], 128, "", "unknown revision"),
+            subprocess.CompletedProcess([], 0, "branch-point\n", ""),
             subprocess.CompletedProcess([], 0, base_source, ""),
         ]
         with patch.dict(os.environ, {"GITHUB_BASE_REF": "master"}):
@@ -65,12 +66,12 @@ class PluginVersionTest(unittest.TestCase):
                 self.test_feature_branch_increases_major_or_minor_version()
 
         self.assertEqual(
-            [call.args[0][1] for call in run.call_args_list],
-            ["show", "show"],
-        )
-        self.assertEqual(
-            [call.args[0][2] for call in run.call_args_list],
-            ["master:plugin.py", "origin/master:plugin.py"],
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["git", "merge-base", "HEAD", "master"],
+                ["git", "merge-base", "HEAD", "origin/master"],
+                ["git", "show", "branch-point:plugin.py"],
+            ],
         )
 
     def test_feature_branch_increases_major_or_minor_version(self):
@@ -92,27 +93,34 @@ class PluginVersionTest(unittest.TestCase):
         if not base_ref.startswith("origin/"):
             base_refs.append(f"origin/{base_ref}")
 
-        base_source = None
+        base_commit = None
         for ref in base_refs:
             result = subprocess.run(
-                ["git", "show", f"{ref}:plugin.py"],
+                ["git", "merge-base", "HEAD", ref],
                 capture_output=True,
                 text=True,
             )
             if result.returncode == 0:
-                base_source = result.stdout
+                base_commit = result.stdout.strip()
                 base_ref = ref
                 break
         self.assertIsNotNone(
-            base_source,
-            f"Could not read plugin.py from base ref; tried {', '.join(base_refs)}",
+            base_commit,
+            f"Could not find merge base with {', '.join(base_refs)}",
         )
 
+        base_source = subprocess.run(
+            ["git", "show", f"{base_commit}:plugin.py"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
         base_version_match = re.search(
             r'<plugin\b[^>]*\bversion="(\d+\.\d+\.\d+)"', base_source
         )
         self.assertIsNotNone(
-            base_version_match, f"Plugin version is missing from base ref {base_ref}"
+            base_version_match,
+            f"Plugin version is missing at merge base with {base_ref}",
         )
 
         current_version = tuple(map(int, self.version_match.group(1).split(".")))
