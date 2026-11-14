@@ -893,33 +893,37 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         with self.assertRaisesRegex(exceptions.GoodweException, "No valid inverter readings"):
             account.getWebData("station-uuid")
 
-    def test_offline_inverter_with_no_measurements_returns_status_only(self):
-        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
-        account.getWebInverterDevices = Mock(return_value=[{
-            "sn": "serial-offline",
-            "deviceType": "INVERTER",
-            "status": -1,
-        }])
-        account.getWebInverterTelemetry = Mock(
-            side_effect=exceptions.GoodweException(
-                "SEMS+ telemetry contains no usable measurements"
-            )
-        )
-        account.getWebInverterTelecounting = Mock(
-            side_effect=exceptions.GoodweException(
-                "SEMS+ telecounting is missing a valid total energy counter"
-            )
-        )
+    def test_non_producing_inverter_with_no_measurements_returns_status_only(self):
+        for status in (-1, 0):
+            with self.subTest(status=status):
+                account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+                account.getWebInverterDevices = Mock(return_value=[{
+                    "sn": "serial-non-producing",
+                    "deviceType": "INVERTER",
+                    "status": status,
+                }])
+                account.getWebInverterTelemetry = Mock(
+                    side_effect=exceptions.GoodweException(
+                        "SEMS+ telemetry contains no usable measurements"
+                    )
+                )
+                account.getWebInverterTelecounting = Mock(
+                    side_effect=exceptions.GoodweException(
+                        "SEMS+ telecounting is missing a valid total energy counter"
+                    )
+                )
 
-        with patch.object(goodwe_module.Domoticz, "Error") as domoticz_error:
-            result = account.getWebData("station-uuid")
+                with patch.object(goodwe_module.Domoticz, "Error") as domoticz_error:
+                    with patch.object(goodwe_module.logging, "error") as log_error:
+                        result = account.getWebData("station-uuid")
 
-        inverter = result["inverter"][0]
-        self.assertEqual(inverter["status"], -1)
-        self.assertEqual(inverter["sn"], "serial-offline")
-        self.assertNotIn("output_power", inverter)
-        self.assertNotIn("etotal", inverter)
-        domoticz_error.assert_not_called()
+                inverter = result["inverter"][0]
+                self.assertEqual(inverter["status"], status)
+                self.assertEqual(inverter["sn"], "serial-non-producing")
+                self.assertNotIn("output_power", inverter)
+                self.assertNotIn("etotal", inverter)
+                domoticz_error.assert_not_called()
+                log_error.assert_not_called()
 
 
 class GoodWeSemsWebApiTest(unittest.TestCase):
