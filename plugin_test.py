@@ -43,6 +43,36 @@ class PluginVersionTest(unittest.TestCase):
         self.assertIsNotNone(displayed_version, "Displayed plugin version is missing")
         self.assertEqual(self.version_match.group(1), displayed_version.group(1))
 
+    def test_feature_branch_check_uses_remote_tracking_base(self):
+        major, minor, _ = map(int, self.version_match.group(1).split("."))
+        base_version = (
+            f"{major}.{minor - 1}.0" if minor else f"{major - 1}.0.0"
+        )
+        base_source = re.sub(
+            r'(<plugin\b[^>]*\bversion=")\d+\.\d+\.\d+(")',
+            rf"\g<1>{base_version}\2",
+            self.plugin_source,
+            count=1,
+        )
+        command_results = [
+            subprocess.CompletedProcess([], 128, "", "unknown revision"),
+            subprocess.CompletedProcess([], 0, base_source, ""),
+        ]
+        with patch.dict(os.environ, {"GITHUB_BASE_REF": "master"}):
+            with patch.object(
+                subprocess, "run", side_effect=command_results
+            ) as run:
+                self.test_feature_branch_increases_major_or_minor_version()
+
+        self.assertEqual(
+            [call.args[0][1] for call in run.call_args_list],
+            ["show", "show"],
+        )
+        self.assertEqual(
+            [call.args[0][2] for call in run.call_args_list],
+            ["master:plugin.py", "origin/master:plugin.py"],
+        )
+
     def test_feature_branch_increases_major_or_minor_version(self):
         base_ref = os.environ.get("GITHUB_BASE_REF")
         if not base_ref:
@@ -58,12 +88,26 @@ class PluginVersionTest(unittest.TestCase):
                 self.skipTest("The default branch has no feature-branch version bump")
             base_ref = "master"
 
-        base_source = subprocess.run(
-            ["git", "show", f"{base_ref}:plugin.py"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
+        base_refs = [base_ref]
+        if not base_ref.startswith("origin/"):
+            base_refs.append(f"origin/{base_ref}")
+
+        base_source = None
+        for ref in base_refs:
+            result = subprocess.run(
+                ["git", "show", f"{ref}:plugin.py"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                base_source = result.stdout
+                base_ref = ref
+                break
+        self.assertIsNotNone(
+            base_source,
+            f"Could not read plugin.py from base ref; tried {', '.join(base_refs)}",
+        )
+
         base_version_match = re.search(
             r'<plugin\b[^>]*\bversion="(\d+\.\d+\.\d+)"', base_source
         )
