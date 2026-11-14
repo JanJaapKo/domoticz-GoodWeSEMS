@@ -327,7 +327,7 @@ class PluginBehaviorTest(unittest.TestCase):
         manual_test.test_calculate_new_energy(self.plugin_module)
 
     def test_update_devices_protects_existing_energy_counter(self):
-        manual_test.test_update_devices_skips_zero_counter_reset(self.plugin_module)
+        manual_test.test_update_devices_preserves_energy_counter(self.plugin_module)
 
     def test_create_devices_adds_expected_units(self):
         manual_test.test_create_devices(self.plugin_module)
@@ -495,6 +495,85 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertNotIn(plugin.outputVoltageBUnit, units)
         self.assertNotIn(plugin.outputVoltageCUnit, units)
         self.assertNotIn(plugin.outputCurrent3PhaseUnit, units)
+
+    def test_update_devices_updates_offline_state_without_measurements(self):
+        plugin = self.plugin_module.GoodWeSEMSPlugin()
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.tokenAvailable = True
+        account.getWebInverterDevices = Mock(return_value=[{
+            "sn": "sn_offline",
+            "deviceType": "INVERTER",
+            "status": -1,
+        }])
+        account.getWebInverterTelemetry = Mock(
+            side_effect=exceptions.GoodweException(
+                "SEMS+ telemetry contains no usable measurements"
+            )
+        )
+        account.getWebInverterTelecounting = Mock(
+            side_effect=exceptions.GoodweException(
+                "SEMS+ telecounting is missing a valid total energy counter"
+            )
+        )
+        plugin.goodWeAccount = account
+        plugin.establishToken = Mock(return_value=True)
+        plugin.getPowerStationIds = Mock(return_value=["station-uuid"])
+        self.plugin_module.Devices = {}
+        plugin.createDevices("sn_offline")
+
+        units = self.plugin_module.Devices["sn_offline"].Units
+        state_unit = units[plugin.inverterStateUnit]
+        state_unit.nValue = 2
+        state_unit.sValue = "30"
+        output_unit = units[plugin.outputPowerUnit]
+        output_unit.sValue = "0;9066300.0"
+
+        with patch.object(self.plugin_module.Domoticz, "Error") as plugin_error:
+            with patch.object(goodwe_module.Domoticz, "Error") as api_error:
+                with self.assertNoLogs(level="ERROR"):
+                    plugin.startDeviceUpdateV2()
+
+        self.assertEqual((state_unit.nValue, state_unit.sValue), (0, "10"))
+        self.assertEqual(state_unit.update_called, 1)
+        self.assertEqual(output_unit.sValue, "0;9066300.0")
+        self.assertEqual(output_unit.update_called, 0)
+        plugin_error.assert_not_called()
+        api_error.assert_not_called()
+        account.getWebInverterTelemetry.assert_called_once_with(
+            "station-uuid", "sn_offline", "INVERTER"
+        )
+
+    def test_zero_pv_counter_keeps_battery_supported_power_reading(self):
+        plugin = self.plugin_module._plugin
+        station = PowerStation(stationData={
+            "info": {"powerstation_id": "station-uuid"},
+            "inverter": [{"sn": "sn_battery", "name": "hybrid inverter"}],
+        })
+        account = Mock()
+        account.powerStationList = {"station-uuid": station}
+        account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
+        plugin.goodWeAccount = account
+        self.plugin_module.Devices = {}
+        plugin.createDevices("sn_battery")
+
+        output_unit = self.plugin_module.Devices["sn_battery"].Units[
+            plugin.outputPowerUnit
+        ]
+        output_unit.sValue = "0;9066300.0"
+
+        plugin.updateDevices({"inverter": [{
+            "sn": "sn_battery",
+            "fault_message": "",
+            "status": 1,
+            "output_power": 500.0,
+            "etotal": 0,
+            "battery": 70,
+            "bms_status": 1,
+            "battery_power": 500,
+        }]}, "station-uuid")
+
+        self.assertEqual(output_unit.sValue, "500.0;9066300.0")
+        self.assertEqual(output_unit.update_called, 1)
 
     def test_update_devices_logs_temperature_for_offline_inverter(self):
         plugin = self.plugin_module._plugin
@@ -685,7 +764,7 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         self.assertEqual(result["inverter"][0]["status"], 1)
         self.assertEqual(account.INVERTER_STATE[result["inverter"][0]["status"]], "generating")
 
-    def test_empty_telemetry_and_counters_return_plugin_safe_station_data(self):
+    def test_empty_telemetry_and_counters_reject_non_offline_device(self):
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
         account.getWebInverterDevices = lambda station_id: [{
             "sn": "54200DSN196R0358",
@@ -696,19 +775,36 @@ class GoodWeFallbackMappingTest(unittest.TestCase):
         account.getWebInverterTelemetry = lambda station_id, serial_number, device_type: {}
         account.getWebInverterTelecounting = lambda station_id, serial_number, device_type: {}
 
-        result = account.getWebData("station-uuid")
-        station = PowerStation(stationData=result)
-        inverter = result["inverter"][0]
+        with self.assertRaisesRegex(exceptions.GoodweException, "No valid inverter readings"):
+            account.getWebData("station-uuid")
 
-        self.assertEqual(result["info"]["powerstation_id"], "station-uuid")
-        self.assertEqual(station.id, "station-uuid")
-        self.assertEqual(inverter["status"], 0)
-        self.assertEqual(inverter["output_current"], 0)
-        self.assertEqual(inverter["output_voltage"], 0)
-        self.assertEqual(inverter["output_power"], 0)
-        self.assertEqual(inverter["etotal"], 0)
-        self.assertEqual(inverter["pv_input_1"], "0V/0A")
-        self.assertIn("fac1", inverter["d"])
+    def test_offline_inverter_with_no_measurements_returns_status_only(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.getWebInverterDevices = Mock(return_value=[{
+            "sn": "serial-offline",
+            "deviceType": "INVERTER",
+            "status": -1,
+        }])
+        account.getWebInverterTelemetry = Mock(
+            side_effect=exceptions.GoodweException(
+                "SEMS+ telemetry contains no usable measurements"
+            )
+        )
+        account.getWebInverterTelecounting = Mock(
+            side_effect=exceptions.GoodweException(
+                "SEMS+ telecounting is missing a valid total energy counter"
+            )
+        )
+
+        with patch.object(goodwe_module.Domoticz, "Error") as domoticz_error:
+            result = account.getWebData("station-uuid")
+
+        inverter = result["inverter"][0]
+        self.assertEqual(inverter["status"], -1)
+        self.assertEqual(inverter["sn"], "serial-offline")
+        self.assertNotIn("output_power", inverter)
+        self.assertNotIn("etotal", inverter)
+        domoticz_error.assert_not_called()
 
 
 class GoodWeSemsWebApiTest(unittest.TestCase):
@@ -885,7 +981,8 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             self.assertEqual(self.account.getWebInverterDevices("station-uuid"), [])
             self.assertEqual(self.account.getWebInverterTelemetry("station-uuid", "serial-1"), {})
             self.assertEqual(self.account.getWebInverterTelecounting("station-uuid", "serial-1"), {})
-            self.account.getWebData("station-uuid")
+            with self.assertRaisesRegex(exceptions.GoodweException, "No valid inverter readings"):
+                self.account.getWebData("station-uuid")
         self.account.tokenRequest.assert_not_called()
 
     def test_empty_web_device_response_is_logged_at_debug_level(self):
@@ -902,7 +999,11 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
     def test_empty_or_c0602_device_response_refreshes_session_and_retries_once(self):
         successful_response = make_response({"data": {"deviceDetailList": [
             {"deviceType": "INVERTER", "statusDetailList": [
-                {"snList": ["serial-1"], "detailMap": {"serial-1": {"sn": "serial-1"}}},
+                {
+                    "status": -1,
+                    "snList": ["serial-1"],
+                    "detailMap": {"serial-1": {"sn": "serial-1"}},
+                },
             ]},
         ]}})
         first_responses = [
@@ -936,7 +1037,7 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         devices = [
             {"sn": "serial-1", "deviceType": "INVERTER", "status": 1, "name": "inverter"},
             {"deviceType": "INVERTER", "status": 1},
-            {"sn": "serial-2", "deviceType": "ENERGY_STORAGE_INTEGRATED_CABINET", "status": 7},
+            {"sn": "serial-2", "deviceType": "ENERGY_STORAGE_INTEGRATED_CABINET", "status": -1},
         ]
         self.account.getWebInverterDevices = Mock(return_value=devices)
         self.account.getWebInverterTelemetry = Mock(side_effect=[
@@ -952,9 +1053,10 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.assertEqual(result["inverter"][0]["status"], 1)
         self.assertEqual(result["inverter"][0]["etotal"], 12.5)
         self.assertEqual(result["inverter"][0]["pv_input_2"], "201V/4A")
-        self.assertEqual(result["inverter"][1]["status"], 0)
+        self.assertEqual(result["inverter"][1]["status"], -1)
         self.assertEqual(result["inverter"][1]["fault_message"], "")
         self.assertEqual(result["inverter"][1]["battery"], "")
+        self.assertNotIn("etotal", result["inverter"][1])
         self.assertEqual(self.account.getWebInverterTelemetry.call_count, 2)
         self.account.getWebInverterTelemetry.assert_any_call(
             "station-uuid", "serial-2", "ENERGY_STORAGE_INTEGRATED_CABINET"

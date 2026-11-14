@@ -185,14 +185,13 @@ def test_calculate_new_energy(plugin_module):
     print("test_calculate_new_energy passed")
 
 
-def test_update_devices_skips_zero_counter_reset(plugin_module):
-    print("\nRunning test_update_devices_skips_zero_counter_reset()")
+def test_update_devices_preserves_energy_counter(plugin_module):
+    print("\nRunning test_update_devices_preserves_energy_counter()")
     serial_number = "sn_counter"
     plugin_module.Devices = {serial_number: FakeDevice(serial_number)}
     output_unit = FakeUnit("Output Power", serial_number, plugin_module._plugin.outputPowerUnit)
     output_unit.sValue = "588.0;9066300.0"
     plugin_module.Devices[serial_number].Units[output_unit.Unit] = output_unit
-    unchanged_units = []
     for name, unit_number, value in (
         ("Output Current", plugin_module._plugin.outputCurrentUnit, "5.2"),
         ("Output Voltage", plugin_module._plugin.outputVoltageUnit, "225.7"),
@@ -201,7 +200,6 @@ def test_update_devices_skips_zero_counter_reset(plugin_module):
         unit = FakeUnit(name, serial_number, unit_number)
         unit.sValue = value
         plugin_module.Devices[serial_number].Units[unit_number] = unit
-        unchanged_units.append((unit, value))
 
     inverter_data = {
         "sn": serial_number,
@@ -223,17 +221,19 @@ def test_update_devices_skips_zero_counter_reset(plugin_module):
     )
 
     plugin_module._plugin.updateDevices({"inverter": [inverter_data]}, station_id)
-    assert output_unit.sValue == "588.0;9066300.0", "A zero total must not reset an existing counter"
-    assert output_unit.update_called == 0, "A suspicious zero counter update must be skipped"
-    for unit, value in unchanged_units:
-        assert unit.sValue == value, f"{unit.Name} must keep its previous value"
-        assert unit.update_called == 0, f"{unit.Name} must not be updated for an empty record"
+    assert output_unit.sValue == "0;9066300.0", "A zero total must not reset an existing counter"
+    assert output_unit.update_called == 1, "A valid zero-power reading should still be applied"
+    assert (
+        plugin_module.Devices[serial_number].Units[
+            plugin_module._plugin.inverterStateUnit
+        ].sValue == "20"
+    ), "An offline status must be recorded even when the energy total is zero"
 
     inverter_data["etotal"] = 9066.4
     plugin_module._plugin.updateDevices({"inverter": [inverter_data]}, station_id)
-    assert output_unit.sValue == "0;9066400.0", "Zero live power with a valid total must still update"
-    assert output_unit.update_called == 1, "A valid cumulative counter update must be applied"
-    print("test_update_devices_skips_zero_counter_reset passed")
+    assert output_unit.sValue == "0;9066400.0", "A valid cumulative counter update must be applied"
+    assert output_unit.update_called == 2, "A valid cumulative counter update must be applied"
+    print("test_update_devices_preserves_energy_counter passed")
 
 
 def test_create_devices(plugin_module):
@@ -357,7 +357,7 @@ def main():
     tests = [
         test_update_device,
         test_calculate_new_energy,
-        test_update_devices_skips_zero_counter_reset,
+        test_update_devices_preserves_energy_counter,
         test_create_devices,
         test_power_station_discovery_and_optional_filter,
         test_station_discovery_failure_skips_telemetry,

@@ -17,12 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.2.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.3.0" author="Jan-Jaap Kostelijk">
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
         <p>The retired legacy SEMS API is no longer supported.</p>
-        <p>Version: 6.2.0</p>
+        <p>Version: 6.3.0</p>
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -244,30 +244,26 @@ class GoodWeSEMSPlugin:
                     )
                 except (KeyError, IndexError, ValueError, AttributeError):
                     currentEnergyCounter = 0
-                if inverter["etotal"] <= 0 and currentEnergyCounter > 0:
-                    logging.warning(
-                        "Skipping update for inverter '%s': empty SEMS+ record (etotal %s, previous energy counter %s)",
-                        inverter["sn"],
-                        inverter["etotal"],
-                        currentEnergyCounter,
-                    )
-                    continue
-
                 if len(inverter['fault_message']) > 0:
                     Domoticz.Log("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
                     logging.info("Fault message from GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter['fault_message']) + "'")
-                Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
-                logging.info("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(inverter["status"]) + ' ' + self.goodWeAccount.INVERTER_STATE[inverter["status"]] + "'")
-                UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, inverter["status"]+1, str((inverter["status"]+2)*10), AlwaysUpdate=True)
-                #Devices[inverter["sn"]].Unit[theInverter.inverterStateUnit].Update(nValue=inverter["status"]+1, sValue=str((inverter["status"]+2)*10))
+                status = inverter.get("status")
+                if status in self.goodWeAccount.INVERTER_STATE:
+                    Domoticz.Log("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(status) + ' ' + self.goodWeAccount.INVERTER_STATE[status] + "'")
+                    logging.info("Status of GoodWe inverter (SN: " + inverter["sn"] + "): '" + str(status) + ' ' + self.goodWeAccount.INVERTER_STATE[status] + "'")
+                    UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, status+1, str((status+2)*10))
                 if inverter.get("tempperature") is not None:
                     UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
-                if self.goodWeAccount.INVERTER_STATE[inverter["status"]] == 'generating':
+                if self.goodWeAccount.INVERTER_STATE.get(inverter.get("status")) == 'generating':
                     logging.debug("inverter generating, log temp")
-                    UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
+                    UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter.get("d", {}).get("fac1", 0)))
 
-                UpdateDevice(inverter["sn"], theInverter.outputCurrentUnit, 0, str(inverter["output_current"]), AlwaysUpdate=True)
-                UpdateDevice(inverter["sn"], theInverter.outputVoltageUnit, 0, str(inverter["output_voltage"]), AlwaysUpdate=True)
+                for field, unit in (
+                    ("output_current", theInverter.outputCurrentUnit),
+                    ("output_voltage", theInverter.outputVoltageUnit),
+                ):
+                    if inverter.get(field) is not None:
+                        UpdateDevice(inverter["sn"], unit, 0, str(inverter[field]), AlwaysUpdate=True)
                 for field, unit in (
                     ("output_voltage_b", theInverter.outputVoltageBUnit),
                     ("output_voltage_c", theInverter.outputVoltageCUnit),
@@ -278,55 +274,39 @@ class GoodWeSEMSPlugin:
                     inverter.get("output_current_b") is not None
                     or inverter.get("output_current_c") is not None
                 ):
-                    phase_currents = (
-                        inverter.get("output_current_a", 0),
-                        inverter.get("output_current_b", 0),
-                        inverter.get("output_current_c", 0),
-                    )
-                    UpdateDevice(
-                        inverter["sn"],
-                        theInverter.outputCurrent3PhaseUnit,
-                        0,
-                        ";".join(str(current) for current in phase_currents) + ";",
-                        AlwaysUpdate=True,
-                    )
-                outputPowerValue = str(inverter["output_power"]) + ";" + str(inverter["etotal"] * 1000)
-                UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue, AlwaysUpdate=True)
-                inputVoltage,inputAmps = inverter["pv_input_1"].split('/')
-                inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1]) #calculate the power based on P = I * V in Watt
-                UpdateDevice(inverter["sn"], theInverter.inputVoltage1Unit, 0, inputVoltage, AlwaysUpdate=True)
-                UpdateDevice(inverter["sn"], theInverter.inputAmps1Unit, 0, inputAmps, AlwaysUpdate=True)
-
-                newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower1Unit, inputPower)
-                UpdateDevice(inverter["sn"],theInverter.inputPower1Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
-
-                if "pv_input_2" in inverter:
-                    logging.debug("Second string found")
-                    inputVoltage,inputAmps = inverter["pv_input_2"].split('/')
-                    UpdateDevice(inverter["sn"],theInverter.inputVoltage2Unit, 0, inputVoltage, AlwaysUpdate=True)
-                    UpdateDevice(inverter["sn"],theInverter.inputAmps2Unit, 0, inputAmps, AlwaysUpdate=True)
-                    inputPower = (float(inputVoltage[:-1])) * (float(inputAmps[:-1]))
-                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower2Unit, inputPower)
-                    UpdateDevice(inverter["sn"],theInverter.inputPower2Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
-                if "pv_input_3" in inverter:
-                    logging.debug("Third string found")
-                    inputVoltage,inputAmps = inverter["pv_input_3"].split('/')
-                    UpdateDevice(inverter["sn"],theInverter.inputVoltage3Unit, 0, inputVoltage, AlwaysUpdate=True)
-                    UpdateDevice(inverter["sn"],theInverter.inputAmps3Unit, 0, inputAmps, AlwaysUpdate=True)
+                    phase_currents = [inverter.get("output_current_" + phase) for phase in ("a", "b", "c")]
+                    if all(current is not None for current in phase_currents):
+                        UpdateDevice(
+                            inverter["sn"],
+                            theInverter.outputCurrent3PhaseUnit,
+                            0,
+                            ";".join(str(current) for current in phase_currents) + ";",
+                            AlwaysUpdate=True,
+                        )
+                if inverter.get("output_power") is not None:
+                    etotal = inverter.get("etotal")
+                    if etotal is None or (etotal <= 0 and currentEnergyCounter > 0):
+                        energyCounter = currentEnergyCounter
+                    else:
+                        energyCounter = etotal * 1000
+                    outputPowerValue = str(inverter["output_power"]) + ";" + str(energyCounter)
+                    UpdateDevice(inverter["sn"], theInverter.outputPowerUnit, 0, outputPowerValue, AlwaysUpdate=True)
+                for idx in range(1, 5):
+                    pv_input = inverter.get("pv_input_" + str(idx))
+                    if pv_input is None:
+                        continue
+                    inputVoltage,inputAmps = pv_input.split('/')
                     inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower3Unit, inputPower)
-                    UpdateDevice(inverter["sn"],theInverter.inputPower3Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
-                if "pv_input_4" in inverter:
-                    logging.debug("Fourth string found")
-                    inputVoltage,inputAmps = inverter["pv_input_4"].split('/')
-                    UpdateDevice(inverter["sn"],theInverter.inputVoltage4Unit, 0, inputVoltage, AlwaysUpdate=True)
-                    UpdateDevice(inverter["sn"],theInverter.inputAmps4Unit, 0, inputAmps, AlwaysUpdate=True)
-                    inputPower = float(inputVoltage[:-1]) * float(inputAmps[:-1])
-                    newCounter = calculateNewEnergy(inverter["sn"], theInverter.inputPower4Unit, inputPower)
-                    UpdateDevice(inverter["sn"],theInverter.inputPower4Unit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                    voltageUnit = getattr(theInverter, "inputVoltage" + str(idx) + "Unit")
+                    ampsUnit = getattr(theInverter, "inputAmps" + str(idx) + "Unit")
+                    powerUnit = getattr(theInverter, "inputPower" + str(idx) + "Unit")
+                    UpdateDevice(inverter["sn"], voltageUnit, 0, inputVoltage, AlwaysUpdate=True)
+                    UpdateDevice(inverter["sn"], ampsUnit, 0, inputAmps, AlwaysUpdate=True)
+                    newCounter = calculateNewEnergy(inverter["sn"], powerUnit, inputPower)
+                    UpdateDevice(inverter["sn"], powerUnit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
                 #log data of battery
-                Domoticz.Debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
-                logging.debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter["battery"],inverter["bms_status"],inverter["battery_power"]))
+                Domoticz.Debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter.get("battery", ""),inverter.get("bms_status", ""),inverter.get("battery_power", "")))
+                logging.debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter.get("battery", ""),inverter.get("bms_status", ""),inverter.get("battery_power", "")))
 
     def createDevices(self, serialNumber, inverterData=None):
         #create domoticz devices

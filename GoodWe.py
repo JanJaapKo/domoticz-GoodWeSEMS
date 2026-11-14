@@ -694,8 +694,29 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             if not isinstance(sn, str):
                 continue
             device_type = device.get("deviceType", "INVERTER")
-            telemetry = self.getWebInverterTelemetry(powerStationId, sn, device_type)
-            counters = self.getWebInverterTelecounting(powerStationId, sn, device_type)
+            offline = self.INVERTER_STATE.get(device.get("status")) == "offline"
+            try:
+                try:
+                    telemetry = self.getWebInverterTelemetry(powerStationId, sn, device_type)
+                except exceptions.GoodweException as exp:
+                    if not offline or str(exp) != "SEMS+ telemetry contains no usable measurements":
+                        raise
+                    telemetry = {}
+                try:
+                    counters = self.getWebInverterTelecounting(powerStationId, sn, device_type)
+                except exceptions.GoodweException as exp:
+                    if not offline or str(exp) != "SEMS+ telecounting is missing a valid total energy counter":
+                        raise
+                    counters = {}
+                if (not telemetry or counters.get("etotal") is None) and not offline:
+                    raise exceptions.GoodweException("Incomplete SEMS+ telemetry or energy counters")
+                if telemetry.get("sn", sn) != sn:
+                    raise exceptions.GoodweException("SEMS+ telemetry serial number does not match the requested inverter")
+            except (requests.exceptions.RequestException, exceptions.GoodweException) as exp:
+                message = "Skipping update for inverter '%s' at station '%s': %s" % (sn, powerStationId, exp)
+                logging.error(message)
+                Domoticz.Error(message)
+                continue
             inverter = {}
             inverter.update(device)
             inverter.update(telemetry)
@@ -710,12 +731,13 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
                 except (TypeError, ValueError):
                     inverter['status'] = 0
             for field in ('tempperature', 'output_current', 'output_voltage', 'output_power', 'etotal'):
-                if inverter.get(field) is None:
+                if not offline and inverter.get(field) is None:
                     inverter[field] = 0
             if not isinstance(inverter.get('d'), dict):
                 inverter['d'] = {}
             inverter['d'].setdefault('fac1', 0)
-            inverter.setdefault('pv_input_1', '0V/0A')
+            if not offline:
+                inverter.setdefault('pv_input_1', '0V/0A')
             for field in ('battery', 'bms_status', 'battery_power'):
                 inverter.setdefault(field, '')
             # map pv inputs
@@ -729,6 +751,10 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
                 inverter['pv_input_4'] = telemetry.get('pv_input_4')
             # counters may have etotal in kWh; leave as-is
             inverters.append(inverter)
+        if not inverters:
+            raise exceptions.GoodweException(
+                "No valid inverter readings for SEMS+ station '%s'; keeping previous Domoticz values" % powerStationId
+            )
         return {
             'info': {
                 'powerstation_id': powerStationId,
