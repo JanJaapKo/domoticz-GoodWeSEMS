@@ -144,7 +144,7 @@ class GoodWeSEMSPlugin:
         if self.goodWeAccount.tokenAvailable:
             try:
                 DeviceData = self.goodWeAccount.stationDataRequestV2(stationId)
-            except (exceptions.TooManyRetries, exceptions.FailureWithErrorCode, exceptions.FailureWithoutErrorCode) as exp:
+            except exceptions.GoodweException as exp:
                 logging.error("Failed to request data: " + str(exp))
                 Domoticz.Error("Failed to request data: " + str(exp))
                 return None
@@ -254,17 +254,11 @@ class GoodWeSEMSPlugin:
                     UpdateDevice(inverter["sn"], theInverter.inverterStateUnit, status+1, str((status+2)*10))
                 if inverter.get("tempperature") is not None:
                     UpdateDevice(inverter["sn"],theInverter.inverterTemperatureUnit, 0, str(inverter["tempperature"]))
-                if self.goodWeAccount.INVERTER_STATE.get(inverter.get("status")) == 'generating':
-                    logging.debug("inverter generating, log temp")
-                    UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter.get("d", {}).get("fac1", 0)))
-
+                if self.goodWeAccount.INVERTER_STATE.get(status) == 'generating' and inverter.get("d", {}).get("fac1") is not None:
+                    UpdateDevice(inverter["sn"],theInverter.outputFreq1Unit, 0, str(inverter["d"]["fac1"]))
                 for field, unit in (
                     ("output_current", theInverter.outputCurrentUnit),
                     ("output_voltage", theInverter.outputVoltageUnit),
-                ):
-                    if inverter.get(field) is not None:
-                        UpdateDevice(inverter["sn"], unit, 0, str(inverter[field]), AlwaysUpdate=True)
-                for field, unit in (
                     ("output_voltage_b", theInverter.outputVoltageBUnit),
                     ("output_voltage_c", theInverter.outputVoltageCUnit),
                 ):

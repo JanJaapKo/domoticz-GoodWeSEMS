@@ -96,7 +96,7 @@ There is a lot more information available trough the GoodWe API if you would lik
 
 Current limitations
 ----------------
-1. The GoodWE API does not always respond in time, leading to errors like below. This is not a problem, data will be updated on the next try.
+1. The GoodWE API does not always respond in time, leading to errors like below. If telemetry or energy counters fail for an inverter, its entire update is skipped and its previous Domoticz readings are retained until a successful poll. Other inverters and stations continue updating. Missing or invalid optional measurements are not replaced with zeros; genuine zero readings and negative battery power remain supported. Temperature is updated when reported, including while the inverter is waiting or charging.
 ``` 
 Error: Zonnepanelen: (Zonnepanelen) RequestException: HTTPSConnectionPool(host='eu.semsportal.com', port=443): Read timed out. (read timeout=10)
 Error: Zonnepanelen: (Zonnepanelen) Failed to request data: Failed to call GoodWe API (too many retries)
