@@ -1,25 +1,48 @@
 """Manually verify SEMS+ power station discovery and live telemetry.
 
-Fill in the configuration values below, then run:
+Copy `.env.example` to `.env`, fill in your SEMS+ credentials, then run:
 
     python telemetry_manual_test.py
 """
 
 import json
 import logging
-import sys, os
+import os
+import sys
+from pathlib import Path
 
 import GoodWe as goodwe_module
 from GoodWe import GoodWeSEMSPlus
 
-# Set these values before running the script.
-SEMS_USERNAME = ""
-SEMS_PASSWORD = ""
-# Optional: set a station ID to query only that station. Leave empty to query
-# every station returned by the SEMS+ station-list endpoint.
-STATION_ID = ""
-SEMS_SERVER = "eu.semsportal.com"
 logger = None
+
+
+def load_env_file(path):
+    if not path.is_file():
+        return
+
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        if entry.startswith("export "):
+            entry = entry[len("export "):].strip()
+
+        name, separator, value = entry.partition("=")
+        name = name.strip()
+        valid_name = bool(name) and (name[0].isalpha() or name[0] == "_")
+        valid_name = valid_name and all(
+            character.isalnum() or character == "_" for character in name
+        )
+        if not separator or not valid_name:
+            raise ValueError(f"Invalid .env entry on line {line_number}")
+
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
 
 
 def get_station_records(response):
@@ -45,6 +68,8 @@ def get_station_id(station):
 
 
 def main():
+    load_env_file(Path(__file__).with_name(".env"))
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logger = logging.getLogger('root')
     log_filename = "goodwe manual test.log"
@@ -60,9 +85,12 @@ def main():
     file_handler.setLevel(root_logger.level)
     root_logger.addHandler(file_handler)
 
-    username = SEMS_USERNAME.strip()
-    password = SEMS_PASSWORD
-    station_id = STATION_ID.strip()
+    username = os.environ.get("SEMS_USERNAME", "").strip()
+    password = os.environ.get("SEMS_PASSWORD", "").strip()
+    station_id = os.environ.get("STATION_ID", "").strip()
+    sems_server = os.environ.get("SEMS_SERVER", "eu.semsportal.com").strip()
+    if not sems_server:
+        sems_server = "eu.semsportal.com"
     missing = [
         name
         for name, value in (
@@ -72,11 +100,14 @@ def main():
         if not value
     ]
     if missing:
-        print("Set these script variables before running: " + ", ".join(missing), file=sys.stderr)
+        print(
+            "Set these values in .env before running: " + ", ".join(missing),
+            file=sys.stderr,
+        )
         return 2
 
     account = GoodWeSEMSPlus(
-        SEMS_SERVER,
+        sems_server,
         "443",
         username,
         password,

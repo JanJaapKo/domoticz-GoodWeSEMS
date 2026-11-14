@@ -2,6 +2,10 @@ import unittest
 import base64
 import hashlib
 import json
+import os
+import re
+import subprocess
+from pathlib import Path
 import GoodWe as goodwe_module
 from unittest.mock import Mock, patch
 from GoodWe import GoodWeSEMSPlus
@@ -20,6 +24,60 @@ def make_response(payload, url="https://example.test/api"):
     response.text = json.dumps(payload)
     response.json.return_value = payload
     return response
+
+
+class PluginVersionTest(unittest.TestCase):
+    def setUp(self):
+        self.plugin_source = Path(__file__).with_name("plugin.py").read_text(
+            encoding="utf-8"
+        )
+        self.version_match = re.search(
+            r'<plugin\b[^>]*\bversion="(\d+\.\d+\.\d+)"', self.plugin_source
+        )
+        self.assertIsNotNone(self.version_match, "Plugin descriptor version is missing")
+
+    def test_descriptor_and_displayed_versions_match(self):
+        displayed_version = re.search(
+            r"<p>Version: (\d+\.\d+\.\d+)</p>", self.plugin_source
+        )
+        self.assertIsNotNone(displayed_version, "Displayed plugin version is missing")
+        self.assertEqual(self.version_match.group(1), displayed_version.group(1))
+
+    def test_feature_branch_increases_major_or_minor_version(self):
+        base_ref = os.environ.get("GITHUB_BASE_REF")
+        if not base_ref:
+            branch = os.environ.get("GITHUB_REF_NAME")
+            if not branch:
+                branch = subprocess.run(
+                    ["git", "branch", "--show-current"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            if branch == "master":
+                self.skipTest("The default branch has no feature-branch version bump")
+            base_ref = "master"
+
+        base_source = subprocess.run(
+            ["git", "show", f"{base_ref}:plugin.py"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        base_version_match = re.search(
+            r'<plugin\b[^>]*\bversion="(\d+\.\d+\.\d+)"', base_source
+        )
+        self.assertIsNotNone(
+            base_version_match, f"Plugin version is missing from base ref {base_ref}"
+        )
+
+        current_version = tuple(map(int, self.version_match.group(1).split(".")))
+        base_version = tuple(map(int, base_version_match.group(1).split(".")))
+        self.assertGreater(
+            current_version[:2],
+            base_version[:2],
+            f"Feature branches must bump the major or minor version above {base_ref}",
+        )
 
 
 class BasicInverterTest(unittest.TestCase):
