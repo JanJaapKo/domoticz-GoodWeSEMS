@@ -38,6 +38,7 @@ from urllib.parse import urlsplit
 NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
 _RequestTimeout = 30
 _SuccessCodes = {0, "0", "00000"}
+_WebTelecountingPeriodCacheSeconds = 600
 _BrowserUserAgent = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:116.0) "
     "Gecko/20100101 Firefox/116.0"
@@ -247,6 +248,7 @@ class _GoodWeAccountBase:
         self.Password = Password
         self.base_url = ""
         self.token = {}
+        self._webTelecountingPeriodCache = {}
         return
 
     @property
@@ -662,9 +664,41 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
         return telemetry
 
     def getWebInverterTelecounting(self, powerStationId, serialNumber, device_type="INVERTER"):
-        url_part = f"/sems-plant/api/equipments/{serialNumber}/telecounting?deviceType={device_type}&pwId={powerStationId}"
+        endpoint = f"/sems-plant/api/equipments/{serialNumber}/telecounting"
+        common_query = f"deviceType={device_type}&pwId={powerStationId}"
+        url_part = (
+            f"{endpoint}?{common_query}"
+            "&groups=telecounting_real&groups=telecounting_today"
+        )
         _, json_response = self._getWebResponse(url_part)
-        factors = self._flatten_web_factors(self._webResponseData(json_response))
+        groups = self._webResponseData(json_response)
+        self._flatten_web_factors(groups)
+
+        cache_key = (powerStationId, serialNumber, device_type)
+        cache = self._webTelecountingPeriodCache.get(cache_key)
+        now = time.monotonic()
+        if (
+            cache is None
+            or now - cache[0] >= _WebTelecountingPeriodCacheSeconds
+        ):
+            period_groups = []
+            for period in ("week", "month", "year", "lifetime"):
+                period_url = (
+                    f"{endpoint}?{common_query}"
+                    f"&groups=telecounting_real&groups=telecounting_{period}"
+                )
+                _, period_response = self._getWebResponse(period_url)
+                response_groups = self._webResponseData(period_response)
+                self._flatten_web_factors(response_groups)
+                period_groups.extend(response_groups)
+            self._webTelecountingPeriodCache[cache_key] = (
+                time.monotonic(),
+                period_groups,
+            )
+        else:
+            period_groups = cache[1]
+
+        factors = self._flatten_web_factors(groups + period_groups)
         counters = {}
         mapping = (("proPvStatsToday", "eday"), ("proPvStatsTotal", "etotal"), ("proPvStatsWeek", "eweek"), ("proPvStatsMonth", "thismonthetotle"), ("proPvStatsYear", "eyear"))
         for src, tgt in mapping:

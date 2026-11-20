@@ -713,7 +713,7 @@ class PluginBehaviorTest(unittest.TestCase):
                         self.plugin_module.Devices[sn].Units[plugin.outputPowerUnit].sValue,
                         "1497.0;25687500.0",
                     )
-                self.assertEqual(len(calls), 7 if failed_endpoint == "telemetry" else 8)
+                self.assertEqual(len(calls), 15 if failed_endpoint == "telemetry" else 16)
 
     def test_successful_optional_readings_do_not_overwrite_missing_sensors(self):
         plugin = self.plugin_module._plugin
@@ -1073,17 +1073,26 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.assertNotIn("pv_input_1", telemetry)
 
     def test_web_telecounting_maps_energy_counters_and_omits_unparseable_values(self):
-        payload = {"data": [{"factors": [
-            {"code": "proPvStatsToday", "data": "3.2"},
-            {"code": "proPvStatsTotal", "data": "1200.5"},
-            {"code": "proPvStatsWeek", "data": "bad-value"},
-            {"code": "proPvStatsMonth", "data": "31.0"},
-            {"code": "proPvStatsYear", "data": "400.0"},
-            {"code": "ignored", "data": None},
-        ]}]}
-        response = make_response(payload)
+        responses = [
+            make_response({"data": [{"factors": [
+                {"code": "proPvStatsToday", "data": "3.2"},
+            ]}]}),
+            make_response({"data": [{"factors": [
+                {"code": "proPvStatsWeek", "data": "bad-value"},
+            ]}]}),
+            make_response({"data": [{"factors": [
+                {"code": "proPvStatsMonth", "data": "31.0"},
+            ]}]}),
+            make_response({"data": [{"factors": [
+                {"code": "proPvStatsYear", "data": "400.0"},
+            ]}]}),
+            make_response({"data": [{"factors": [
+                {"code": "proPvStatsTotal", "data": "1200.5"},
+                {"code": "ignored", "data": None},
+            ]}]}),
+        ]
 
-        with patch("GoodWe.requests.get", return_value=response) as get:
+        with patch("GoodWe.requests.get", side_effect=responses) as get:
             counters = self.account.getWebInverterTelecounting("station-uuid", "serial-1")
 
         self.assertEqual(counters, {
@@ -1093,11 +1102,35 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             "eyear": 400.0,
         })
         self.assertEqual(
-            get.call_args.args[0],
-            "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/equipments/serial-1/telecounting?deviceType=INVERTER&pwId=station-uuid",
+            [call.args[0] for call in get.call_args_list],
+            [
+                "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/equipments/serial-1/telecounting?deviceType=INVERTER&pwId=station-uuid&groups=telecounting_real&groups=telecounting_today",
+                "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/equipments/serial-1/telecounting?deviceType=INVERTER&pwId=station-uuid&groups=telecounting_real&groups=telecounting_week",
+                "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/equipments/serial-1/telecounting?deviceType=INVERTER&pwId=station-uuid&groups=telecounting_real&groups=telecounting_month",
+                "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/equipments/serial-1/telecounting?deviceType=INVERTER&pwId=station-uuid&groups=telecounting_real&groups=telecounting_year",
+                "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/equipments/serial-1/telecounting?deviceType=INVERTER&pwId=station-uuid&groups=telecounting_real&groups=telecounting_lifetime",
+            ],
         )
         self.assertEqual(get.call_args.kwargs["timeout"], 10)
         self.assertIn("X-Signature", get.call_args.kwargs["headers"])
+
+    def test_web_telecounting_refreshes_cached_period_groups_every_ten_minutes(self):
+        response = make_response({"data": [{"factors": [
+            {"code": "proPvStatsToday", "data": "3.2"},
+            {"code": "proPvStatsTotal", "data": "1200.5"},
+        ]}]})
+
+        with patch("GoodWe.time.monotonic", side_effect=[0, 0, 10, 601, 601]), \
+                patch("GoodWe.requests.get", return_value=response) as get:
+            self.account.getWebInverterTelecounting("station-uuid", "serial-1")
+            self.assertEqual(get.call_count, 5)
+
+            self.account.getWebInverterTelecounting("station-uuid", "serial-1")
+            self.assertEqual(get.call_count, 6)
+
+            self.account.getWebInverterTelecounting("station-uuid", "serial-1")
+
+        self.assertEqual(get.call_count, 11)
 
     def test_web_request_failures_propagate_instead_of_returning_empty_results(self):
         timeout = goodwe_module.requests.exceptions.Timeout("offline")
