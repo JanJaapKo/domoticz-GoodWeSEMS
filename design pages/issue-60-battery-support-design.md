@@ -205,6 +205,35 @@ contact GoodWe services.
 10. Daily charge/discharge counters preserve kWh values and tolerate the daily
     reset without being treated as lifetime totals.
 
+## Testing this branch on a Raspberry Pi
+
+The `feature/battery-support` branch must be pushed to GitHub before it can be
+checked out on the Pi. From the existing plugin clone on the Pi, fetch and
+check out the branch once:
+
+```bash
+cd ~/domoticz/plugins/domoticz-GoodWeSEMS
+git fetch origin feature/battery-support
+git checkout --track -b feature/battery-support origin/feature/battery-support
+```
+
+For later updates to the same branch:
+
+```bash
+cd ~/domoticz/plugins/domoticz-GoodWeSEMS
+git checkout feature/battery-support
+git pull --ff-only origin feature/battery-support
+```
+
+Keep the Pi's `.env` file local and untracked. Run
+`python3 telemetry_manual_test.py` from the plugin directory, optionally set
+`STATION_ID` to test one station. The script also queries the read-only
+station-flow, station-statistics, related battery-device, battery telemetry,
+and battery-state endpoints used by Home Assistant; it does not issue battery
+control commands. Share the output only after masking station IDs,
+inverter/battery serial numbers, station names, addresses, and other
+identifying data.
+
 ## Acceptance criteria
 
 - Battery percentage, signed battery power, and captured daily energy values
