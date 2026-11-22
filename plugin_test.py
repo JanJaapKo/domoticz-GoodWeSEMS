@@ -1,10 +1,12 @@
 import unittest
 import base64
 import hashlib
+import io
 import json
 import os
 import re
 import subprocess
+from contextlib import redirect_stdout
 from pathlib import Path
 import GoodWe as goodwe_module
 from unittest.mock import Mock, patch
@@ -15,6 +17,7 @@ from GoodWe import Inverter
 import exceptions
 import logging
 import manual_test
+import telemetry_manual_test
 
 
 def make_response(payload, url="https://example.test/api"):
@@ -24,6 +27,94 @@ def make_response(payload, url="https://example.test/api"):
     response.text = json.dumps(payload)
     response.json.return_value = payload
     return response
+
+
+class TelemetryManualTest(unittest.TestCase):
+    def test_request_web_endpoint_uses_account_headers_and_json_payload(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.token = {
+            "uid": "user-id",
+            "token": "sems-session-token",
+            "client": "semsPlusWeb",
+            "api": "https://eu-gateway.semsportal.com/web/sems",
+        }
+        account.base_url = account.token["api"]
+        response = make_response({"code": "00000", "data": {"dataList": []}})
+
+        with patch(
+            "GoodWe.requests.post", return_value=response
+        ) as post:
+            result = telemetry_manual_test.request_web_endpoint(
+                account,
+                "POST",
+                "/sems-plant/api/stations/statistics",
+                {"stationId": "station-1"},
+            )
+
+        self.assertEqual(result["code"], "00000")
+        post.assert_called_once()
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://eu-gateway.semsportal.com/web/sems/"
+            "sems-plant/api/stations/statistics",
+        )
+        self.assertEqual(
+            post.call_args.kwargs["json"], {"stationId": "station-1"}
+        )
+        self.assertTrue(post.call_args.kwargs["headers"]["X-Signature"])
+
+    def test_ha_battery_probe_deduplicates_storage_inverters_and_reuses_core_data(self):
+        account = Mock()
+        station_data = {
+            "inverter": [
+                {"sn": "hybrid-1", "subtype": "store", "deviceType": "INVERTER"},
+                {"sn": "grid-1", "subtype": "grid", "deviceType": "INVERTER"},
+                {"sn": "hybrid-1", "subtype": "store", "deviceType": "INVERTER"},
+            ]
+        }
+        related_devices = [
+            {
+                "type": "BAT_SYS",
+                "sn": "battery-1",
+                "translateCode": "battery-slot-1",
+                "no": 0,
+                "isConnected": True,
+            }
+        ]
+        calls = []
+
+        def request(account_arg, method, url_part, payload=None):
+            calls.append((method, url_part, payload, account_arg))
+            if "/relatedDevices?" in url_part:
+                return related_devices
+            return {"code": "00000", "data": {}}
+
+        with patch.object(
+            telemetry_manual_test, "request_web_endpoint", side_effect=request
+        ), redirect_stdout(io.StringIO()):
+            failures = telemetry_manual_test.probe_ha_battery_endpoints(
+                account, "station-1", station_data
+            )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            sum("relatedDevices?" in call[1] for call in calls), 1
+        )
+        self.assertEqual(
+            sum("deviceType=BAT_SYS" in call[1] for call in calls), 1
+        )
+        self.assertFalse(any("all-status" in call[1] for call in calls))
+        self.assertFalse(any("/telecounting" in call[1] for call in calls))
+        self.assertFalse(
+            any(
+                "deviceType=INVERTER" in call[1] and "/telemetry" in call[1]
+                for call in calls
+            )
+        )
+        self.assertEqual(
+            sum("get-cache-device-function-parameters" in call[1] for call in calls),
+            1,
+        )
 
 
 class PluginVersionTest(unittest.TestCase):
