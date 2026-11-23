@@ -31,6 +31,7 @@ class FakeUnit:
         self.DeviceID = DeviceID
         self.Unit = Unit
         self.Type = Type
+        self.TypeName = kwargs.get("TypeName")
         self.Subtype = Subtype
         self.Options = kwargs.get("Options")
         self.Used = kwargs.get("Used")

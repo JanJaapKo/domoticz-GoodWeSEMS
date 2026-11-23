@@ -503,6 +503,97 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertNotIn(plugin.outputVoltageCUnit, units)
         self.assertNotIn(plugin.outputCurrent3PhaseUnit, units)
 
+    def test_update_devices_maps_ha_battery_sensors_only_to_storage_inverters(self):
+        plugin = self.plugin_module._plugin
+        station = PowerStation(stationData={
+            "info": {"powerstation_id": "station-uuid"},
+            "inverter": [
+                {"sn": "hybrid-1", "subtype": "store"},
+                {"sn": "grid-1", "subtype": "grid"},
+            ],
+        })
+        account = Mock()
+        account.powerStationList = {"station-uuid": station}
+        account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
+        plugin.goodWeAccount = account
+        self.plugin_module.Devices = {}
+        data = {"inverter": [
+            {
+                "sn": "hybrid-1",
+                "subtype": "store",
+                "deviceType": "INVERTER",
+                "fault_message": "",
+                "status": 0,
+                "battery_charge_today": 0.4,
+                "battery_discharge_today": 1.7,
+                "batteries": [{
+                    "sn": "battery-1",
+                    "soc": 9,
+                    "power": 33.53,
+                    "voltage": 47.9,
+                    "current": 0.7,
+                    "soh": 100,
+                    "temperature": 15.2,
+                    "max_charge_current": 50,
+                    "max_discharge_current": 20,
+                }],
+            },
+            {
+                "sn": "grid-1",
+                "subtype": "grid",
+                "deviceType": "INVERTER",
+                "fault_message": "",
+                "status": 0,
+                "batteries": [{
+                    "sn": "unexpected-battery",
+                    "soc": 50,
+                }],
+            },
+        ]}
+
+        plugin.updateDevices(data, "station-uuid")
+
+        hybrid_units = self.plugin_module.Devices["hybrid-1"].Units
+        self.assertEqual(hybrid_units[plugin.batteryChargeTodayUnit].sValue, "0.4")
+        self.assertEqual(hybrid_units[plugin.batteryDischargeTodayUnit].sValue, "1.7")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart].sValue, "9")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 1].sValue, "33.53")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 2].sValue, "47.9")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 3].sValue, "0.7")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 4].sValue, "100")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 5].sValue, "15.2")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 6].sValue, "50")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 7].sValue, "20")
+        self.assertEqual(
+            (hybrid_units[plugin.batteryUnitStart].TypeName,
+             hybrid_units[plugin.batteryUnitStart].Subtype),
+            ("General", 6),
+        )
+        self.assertIn("Battery 1 percentage", hybrid_units[plugin.batteryUnitStart].Name)
+        self.assertEqual(
+            (hybrid_units[plugin.batteryUnitStart + 1].Type,
+             hybrid_units[plugin.batteryUnitStart + 1].Subtype),
+            (250, 1),
+        )
+        self.assertEqual(
+            hybrid_units[plugin.batteryChargeTodayUnit].Options,
+            {"Custom": "kWh"},
+        )
+        grid_units = self.plugin_module.Devices["grid-1"].Units
+        self.assertFalse(any(unit >= plugin.batteryChargeTodayUnit for unit in grid_units))
+        self.assertFalse(
+            any("setpoint" in unit.Name.lower() for unit in hybrid_units.values())
+        )
+
+        soc_unit = hybrid_units[plugin.batteryUnitStart]
+        soc_unit.sValue = "7"
+        data["inverter"][0].pop("battery_charge_today")
+        data["inverter"][0].pop("battery_discharge_today")
+        data["inverter"][0]["batteries"] = []
+        plugin.updateDevices(data, "station-uuid")
+        self.assertEqual(soc_unit.sValue, "7")
+        self.assertEqual(soc_unit.update_called, 1)
+
     def test_update_devices_updates_offline_state_without_measurements(self):
         plugin = self.plugin_module.GoodWeSEMSPlugin()
         account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
@@ -971,6 +1062,60 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/stations/device/all-status?stationId=station-uuid",
         )
 
+    def test_web_battery_device_request_keeps_connected_battery_systems_only(self):
+        response = make_response({"data": [
+            {"type": "BAT_SYS", "sn": "battery-1", "isConnected": True},
+            {"type": "BAT_SYS", "sn": "battery-2", "isConnected": False},
+            {"type": "INVERTER", "sn": "inverter-1", "isConnected": True},
+            {"type": "BAT_SYS", "sn": "battery-1", "isConnected": True},
+        ]})
+
+        with patch("GoodWe.requests.get", return_value=response) as get:
+            batteries = self.account.getWebBatteryDevices(
+                "station-uuid", "inverter-1"
+            )
+
+        self.assertEqual([battery["sn"] for battery in batteries], ["battery-1"])
+        self.assertEqual(
+            get.call_args.args[0],
+            "https://eu-gateway.semsportal.com/web/sems/"
+            "sems-plant/api/equipments/inverter-1/relatedDevices"
+            "?sn=inverter-1&deviceType=ENERGY_STORAGE_INTEGRATED_CABINET"
+            "&pwId=station-uuid",
+        )
+
+    def test_web_battery_telemetry_maps_ha_sensors_and_preserves_signed_power(self):
+        response = make_response({"data": [{"factors": [
+            {"code": "pBat", "data": "-1.0922"},
+            {"code": "voltage", "data": "47.9"},
+            {"code": "a", "data": "0.7"},
+            {"code": "soc", "data": "89"},
+            {"code": "soh", "data": "100"},
+            {"code": "batSysTemp", "data": "15.2"},
+            {"code": "aMaxChar", "data": "50"},
+            {"code": "aMaxDischar", "data": "20"},
+        ]}]})
+
+        with patch("GoodWe.requests.get", return_value=response) as get:
+            telemetry = self.account.getWebBatteryTelemetry(
+                "station-uuid", "battery-1"
+            )
+
+        self.assertEqual(telemetry, {
+            "power": -1092.2,
+            "voltage": 47.9,
+            "current": 0.7,
+            "soc": 89.0,
+            "soh": 100.0,
+            "temperature": 15.2,
+            "max_charge_current": 50.0,
+            "max_discharge_current": 20.0,
+        })
+        self.assertIn(
+            "/equipments/battery-1/telemetry?deviceType=BAT_SYS&pwId=station-uuid",
+            get.call_args.args[0],
+        )
+
     def test_web_telemetry_maps_ac_frequency_temperature_and_four_pv_strings(self):
         factor_values = {
             "Temperature": "36.5",
@@ -1083,6 +1228,8 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         responses = [
             make_response({"data": [{"factors": [
                 {"code": "proPvStatsToday", "data": "3.2"},
+                {"code": "proCharStatsToday", "data": "0.4"},
+                {"code": "proDischarStatsToday", "data": "1.7"},
             ]}]}),
             make_response({"data": [{"factors": [
                 {"code": "proPvStatsWeek", "data": "bad-value"},
@@ -1107,6 +1254,8 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             "etotal": 1200.5,
             "thismonthetotle": 31.0,
             "eyear": 400.0,
+            "battery_charge_today": 0.4,
+            "battery_discharge_today": 1.7,
         })
         self.assertEqual(
             [call.args[0] for call in get.call_args_list],
@@ -1214,6 +1363,7 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             {"output_power": 0.0},
         ])
         self.account.getWebInverterTelecounting = Mock(side_effect=[{"etotal": 12.5}, {"etotal": 0}])
+        self.account.getWebBatteryDevices = Mock(return_value=[])
 
         result = self.account.getWebData("station-uuid")
 
@@ -1231,6 +1381,55 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.account.getWebInverterTelemetry.assert_any_call(
             "station-uuid", "serial-2", "ENERGY_STORAGE_INTEGRATED_CABINET"
         )
+
+    def test_get_web_data_fetches_battery_telemetry_only_for_storage_inverters(self):
+        self.account.getWebInverterDevices = Mock(return_value=[
+            {"sn": "hybrid-1", "deviceType": "INVERTER", "subtype": "store", "status": 0},
+            {"sn": "grid-1", "deviceType": "INVERTER", "subtype": "grid", "status": 0},
+        ])
+        self.account.getWebInverterTelemetry = Mock(return_value={"tempperature": 25})
+        self.account.getWebInverterTelecounting = Mock(return_value={"etotal": 10})
+        self.account.getWebBatteryDevices = Mock(
+            return_value=[{"type": "BAT_SYS", "sn": "battery-1"}]
+        )
+        self.account.getWebBatteryTelemetry = Mock(return_value={
+            "power": 35.0,
+            "soc": 9.0,
+        })
+
+        result = self.account.getWebData("station-uuid")
+
+        hybrid, grid = result["inverter"]
+        self.assertEqual(hybrid["batteries"], [{
+            "sn": "battery-1",
+            "power": 35.0,
+            "soc": 9.0,
+        }])
+        self.assertNotIn("batteries", grid)
+        self.account.getWebBatteryDevices.assert_called_once_with(
+            "station-uuid", "hybrid-1"
+        )
+        self.account.getWebBatteryTelemetry.assert_called_once_with(
+            "station-uuid", "battery-1"
+        )
+
+    def test_battery_endpoint_failure_does_not_skip_inverter_data(self):
+        self.account.getWebInverterDevices = Mock(return_value=[
+            {"sn": "hybrid-1", "deviceType": "INVERTER", "subtype": "store", "status": 0},
+        ])
+        self.account.getWebInverterTelemetry = Mock(return_value={"tempperature": 25})
+        self.account.getWebInverterTelecounting = Mock(return_value={"etotal": 10})
+        self.account.getWebBatteryDevices = Mock(
+            side_effect=goodwe_module.requests.exceptions.Timeout("offline")
+        )
+
+        with patch("GoodWe.Domoticz.Error") as domoticz_error:
+            result = self.account.getWebData("station-uuid")
+
+        self.assertEqual(len(result["inverter"]), 1)
+        self.assertEqual(result["inverter"][0]["tempperature"], 25)
+        self.assertNotIn("batteries", result["inverter"][0])
+        domoticz_error.assert_called_once()
 
     def test_web_responses_reject_api_errors_empty_and_malformed_data(self):
         payloads = (
