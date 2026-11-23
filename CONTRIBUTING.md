@@ -23,7 +23,7 @@ python -m compileall -q GoodWe.py plugin.py exceptions.py fakeDomoticz.py
 - For API changes, test request URL, payload, headers, regional host selection, and error responses with mocked HTTP calls. Cover incomplete or empty telemetry where it affects Domoticz-facing data.
 - For plugin changes, use the fake Domoticz host to cover station discovery and persistence, missing station IDs, device creation/update behavior, heartbeat scheduling, and protection against suspicious zero energy-counter resets when relevant.
 - Keep tests deterministic and offline. Mock network calls; do not commit credentials, account data, or live-service dependencies.
-- The regression suite checks that a feature branch increases the major or minor plugin version over its PR base (or `master` on branch pushes), and that the displayed version matches the plugin descriptor.
+- The regression suite checks that the displayed plugin version matches both the plugin descriptor and `version.txt`.
 - Keep plugin-facing station and inverter data safe for incomplete API responses. The plugin supports SEMS+ only; do not add legacy SEMS endpoint fallbacks.
 - Update the README or plugin configuration documentation when user-visible behavior, setup, or limitations change. Update the plugin version for a release as appropriate.
 
@@ -33,6 +33,10 @@ Describe the user-visible change and any compatibility implications. Include the
 
 ## Versioning
 
-- Bump the minor version when creating a new feature branch.
-- Bump the major version when explicitly requested, or when a mandatory plugin configuration attribute is added or removed.
-- Use the patch version for other release fixes that do not require a major or minor bump.
+Release Please creates a release pull request on `master` after changes are merged. Use Conventional Commit messages so it can determine the next version and generate release notes:
+
+- `feat: ...` for a new feature (minor release).
+- `fix: ...` for a bug fix (patch release).
+- Add `BREAKING CHANGE: ...` to the commit body for an incompatible change (major release).
+
+Do not manually bump the plugin version in feature pull requests. The release pull request updates `version.txt` and both version strings in `plugin.py`.
