@@ -1,0 +1,11 @@
+{
+  "include-v-in-tag": false,
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "extra-files": [
+        "plugin.py"
+      ]
+    }
+  }
+}

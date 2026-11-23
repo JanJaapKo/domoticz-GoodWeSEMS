@@ -17,12 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.3.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.4.0" author="Jan-Jaap Kostelijk"> <!-- x-release-please-version -->
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
         <p>The retired legacy SEMS API is no longer supported.</p>
-        <p>Version: 6.3.0</p>
+        <p>Version: 6.4.0</p> <!-- x-release-please-version -->
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
