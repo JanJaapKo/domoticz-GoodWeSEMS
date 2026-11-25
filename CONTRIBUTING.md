@@ -25,7 +25,7 @@ python -m compileall -q GoodWe.py plugin.py exceptions.py fakeDomoticz.py
 - Keep tests deterministic and offline. Mock network calls; do not commit credentials, account data, or live-service dependencies.
 - The regression suite checks that the displayed plugin version matches both the plugin descriptor and `version.txt`.
 - Keep plugin-facing station and inverter data safe for incomplete API responses. The plugin supports SEMS+ only; do not add legacy SEMS endpoint fallbacks.
-- Update the README or plugin configuration documentation when user-visible behavior, setup, or limitations change. Update the plugin version for a release as appropriate.
+- Update the README's created-device description whenever you add or change Domoticz devices, including their names, units, types, and creation conditions. Also update plugin configuration documentation when setup or limitations change. Update the plugin version for a release as appropriate.
 
 ## Pull Requests
 
