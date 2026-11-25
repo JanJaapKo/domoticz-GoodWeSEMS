@@ -1,20 +1,34 @@
-"""Manually verify SEMS+ power station discovery and live telemetry.
+"""Manually verify SEMS+ telemetry and Home Assistant battery endpoints.
 
 Copy `.env.example` to `.env`, fill in your SEMS+ credentials, then run:
 
     python telemetry_manual_test.py
+
+The output contains station and device identifiers. Mask them before sharing.
 """
 
 import json
 import logging
 import os
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 import GoodWe as goodwe_module
 from GoodWe import GoodWeSEMSPlus
 
 logger = None
+
+HA_STATISTICS_ITEMS = [
+    "proConsumStats",
+    "proGridStats",
+    "proPurchaseStats",
+    "proSelfConsumStats",
+    "proDischarStats",
+    "proCharStats",
+    "proSystemTotalStats",
+]
 
 
 def load_env_file(path):
@@ -65,6 +79,198 @@ def get_station_id(station):
         return None
     station_id = station.get("PowerStationId") or station.get("id")
     return station_id.strip() if isinstance(station_id, str) and station_id.strip() else None
+
+
+def request_web_endpoint(account, method, url_part, payload=None):
+    """Request a read-only SEMS+ Web endpoint using the account's session."""
+    method = method.upper()
+    if method not in ("GET", "POST"):
+        raise ValueError("Only GET and POST are supported by the telemetry tester")
+
+    headers = account.apiRequestHeadersV2()
+    if isinstance(account.token, dict) and account.token.get("client") == "semsPlusWeb":
+        signature = account._generate_signature(account.token)
+        if signature:
+            headers["X-Signature"] = signature
+
+    request = getattr(goodwe_module.requests, method.lower())
+    request_kwargs = {"headers": headers, "timeout": 10}
+    if payload is not None:
+        request_kwargs["json"] = payload
+    response = request(account.base_url.rstrip("/") + url_part, **request_kwargs)
+    response.raise_for_status()
+    try:
+        response_body = response.json()
+    except ValueError as error:
+        raise ValueError(f"{method} {url_part} did not return valid JSON") from error
+
+    if isinstance(response_body, dict) and "code" in response_body:
+        if str(response_body["code"]) not in ("0", "00000"):
+            raise ValueError(
+                f"{method} {url_part} returned API code "
+                f"{response_body['code']}: "
+                f"{response_body.get('msg', response_body.get('description', ''))}"
+            )
+    return response_body
+
+
+def get_response_data(response_body):
+    """Return the data payload from an API envelope when one is present."""
+    if isinstance(response_body, dict) and "data" in response_body:
+        return response_body["data"]
+    return response_body
+
+
+def probe_ha_battery_endpoints(account, station_id, station_data):
+    """Query HA's additional read-only battery endpoints without repeating
+    station discovery or inverter telemetry already requested above.
+    """
+    failures = []
+
+    def request_optional(label, method, url_part, payload=None):
+        print(f"\n===== Querying HA {label} =====")
+        try:
+            return request_web_endpoint(account, method, url_part, payload)
+        except (goodwe_module.requests.exceptions.RequestException, ValueError) as error:
+            print(f"HA {label} request failed: {error}", file=sys.stderr)
+            failures.append(label)
+            return None
+
+    station_query = urlencode({"stationId": station_id})
+    request_optional(
+        "station flow",
+        "GET",
+        f"/sems-plant/api/stations/flow?{station_query}",
+    )
+
+    now = datetime.now().astimezone()
+    request_optional(
+        "station statistics (current day)",
+        "POST",
+        "/sems-plant/api/stations/statistics",
+        {
+            "stationId": station_id,
+            "isReport": False,
+            "items": HA_STATISTICS_ITEMS,
+            "dimension": "day",
+            "startTime": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "endTime": (now + timedelta(days=1) - timedelta(seconds=1)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+        },
+    )
+
+    # station_data already includes the all-status result and inverter
+    # telemetry/counters. Reuse its inverter identities rather than requesting
+    # those endpoints a second time.
+    storage_inverters = {}
+    for inverter in station_data.get("inverter", []):
+        if not isinstance(inverter, dict):
+            continue
+        serial_number = inverter.get("sn")
+        is_storage = (
+            inverter.get("subtype") == "store"
+            or inverter.get("deviceType") == "ENERGY_STORAGE_INTEGRATED_CABINET"
+        )
+        if isinstance(serial_number, str) and serial_number and is_storage:
+            storage_inverters.setdefault(serial_number, inverter)
+
+    queried_battery_serials = set()
+    for serial_number in storage_inverters:
+        related_path = (
+            f"/sems-plant/api/equipments/{quote(serial_number, safe='')}/relatedDevices?"
+            + urlencode({
+                "sn": serial_number,
+                "deviceType": "ENERGY_STORAGE_INTEGRATED_CABINET",
+                "pwId": station_id,
+            })
+        )
+        related_response = request_optional(
+            f"related storage devices for inverter {serial_number}",
+            "GET",
+            related_path,
+        )
+        if related_response is None:
+            continue
+
+        related_devices = get_response_data(related_response)
+        if isinstance(related_devices, dict):
+            related_devices = related_devices.get("dataList")
+        if not isinstance(related_devices, list):
+            print(
+                f"HA related-device response for inverter {serial_number} "
+                "did not contain a device list.",
+                file=sys.stderr,
+            )
+            failures.append(f"related storage devices for inverter {serial_number}")
+            continue
+
+        has_connected_battery_slot = False
+        for related_device in related_devices:
+            if not isinstance(related_device, dict):
+                continue
+
+            if (
+                related_device.get("translateCode") is not None
+                and related_device.get("isConnected") is not False
+            ):
+                has_connected_battery_slot = True
+                request_optional(
+                    f"battery functions for inverter {serial_number}, "
+                    f"slot {related_device.get('no', 0)}",
+                    "POST",
+                    "/sems-remote/api/v2/address/remote/getDeviceFunctionTabMenus",
+                    {
+                        "batIndex": str(related_device.get("no", 0)),
+                        "menuCode": 1,
+                        "module": "GENERAL_FUNCTIONS",
+                        "sn": serial_number,
+                    },
+                )
+
+            device_type = related_device.get("type") or related_device.get("deviceType")
+            battery_serial = related_device.get("sn")
+            if (
+                device_type != "BAT_SYS"
+                or not isinstance(battery_serial, str)
+                or not battery_serial
+                or battery_serial in queried_battery_serials
+            ):
+                continue
+
+            queried_battery_serials.add(battery_serial)
+            battery_query = urlencode(
+                {"deviceType": "BAT_SYS", "pwId": station_id}
+            )
+            request_optional(
+                f"BAT_SYS telemetry for battery {battery_serial}",
+                "GET",
+                f"/sems-plant/api/equipments/"
+                f"{quote(battery_serial, safe='')}/telemetry?{battery_query}",
+            )
+
+        if has_connected_battery_slot:
+            request_optional(
+                f"immediate-charging state for inverter {serial_number}",
+                "POST",
+                "/sems-remote/api/v1/address/remote/get-cache-device-function-parameters",
+                {
+                    "sn": serial_number,
+                    "addresses": ["47545", "47545", "47546", "47603"],
+                    "addrFuncMap": {
+                        "47545": "2013217017330515970",
+                        "47546": "1991791639537946635",
+                        "47603": "1991791639537946636",
+                    },
+                },
+            )
+
+    if not storage_inverters:
+        print(
+            "No storage-capable inverter was identified in the normalized "
+            "station data; related battery endpoints were skipped."
+        )
+    return failures
 
 
 def main():
@@ -139,9 +345,6 @@ def main():
     try:
         print("===== Requesting SEMS+ power station list... =====")
         station_response = account.powerStationListRequest()
-        print("\n===== Station list returned by GoodWeSEMSPlus.powerStationListRequest() =====")
-        print(json.dumps(station_response, indent=2, sort_keys=True, default=str))
-
         station_records = get_station_records(station_response)
         stations_by_id = {}
         for station in station_records:
@@ -175,6 +378,7 @@ def main():
             selected_stations = stations_by_id
 
         failures = []
+        endpoint_failures = []
         for selected_id in selected_stations:
             print(f"\n===== Querying Domoticz telemetry for station {selected_id}... =====")
             try:
@@ -194,10 +398,20 @@ def main():
             print(json.dumps(station_data, indent=2, sort_keys=True, default=str))
             inverters = station_data.get("inverter", [])
             print(f"SEMS+ inverters returned for station {selected_id}: {len(inverters)}")
+            endpoint_failures.extend(
+                probe_ha_battery_endpoints(account, selected_id, station_data)
+            )
 
         if failures:
             print(
                 "Telemetry failed for station(s): " + ", ".join(failures),
+                file=sys.stderr,
+            )
+            return 1
+        if endpoint_failures:
+            print(
+                "One or more optional Home Assistant endpoint probes failed: "
+                + ", ".join(endpoint_failures),
                 file=sys.stderr,
             )
             return 1

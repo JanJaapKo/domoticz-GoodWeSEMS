@@ -33,7 +33,7 @@ import hashlib
 import base64
 import uuid
 import math
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 NEW_LOGIN_URL = "https://semsplus.goodwe.com/web/sems/sems-user/api/v1/auth/cross-login"
 _RequestTimeout = 30
@@ -63,7 +63,7 @@ class Inverter:
     """
     A class to describe the methods and properties of a GoodWe inverter
     """
-    domoticzDevices = 25
+    domoticzDevices = 35
     inverterTemperatureUnit = 1
     inverterStateUnit = 9
     outputCurrentUnit = 2
@@ -663,6 +663,67 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             raise exceptions.GoodweException("SEMS+ telemetry contains no usable measurements")
         return telemetry
 
+    def getWebBatteryDevices(self, powerStationId, serialNumber):
+        url_part = (
+            f"/sems-plant/api/equipments/{quote(serialNumber, safe='')}/relatedDevices"
+            f"?sn={quote(serialNumber, safe='')}"
+            "&deviceType=ENERGY_STORAGE_INTEGRATED_CABINET"
+            f"&pwId={quote(powerStationId, safe='')}"
+        )
+        _, json_response = self._getWebResponse(url_part)
+        devices = self._webResponseData(json_response)
+        if isinstance(devices, dict):
+            devices = devices.get("dataList")
+        if not isinstance(devices, list):
+            raise exceptions.GoodweException(
+                "SEMS+ related-device response is missing a device list"
+            )
+
+        batteries = []
+        seen_serial_numbers = set()
+        for device in devices:
+            if not isinstance(device, dict):
+                continue
+            device_type = device.get("type") or device.get("deviceType")
+            battery_serial = device.get("sn")
+            if (
+                device_type != "BAT_SYS"
+                or not isinstance(battery_serial, str)
+                or not battery_serial.strip()
+                or device.get("isConnected") is False
+                or battery_serial in seen_serial_numbers
+            ):
+                continue
+            seen_serial_numbers.add(battery_serial)
+            batteries.append(device)
+        return batteries
+
+    def getWebBatteryTelemetry(self, powerStationId, serialNumber):
+        url_part = (
+            f"/sems-plant/api/equipments/{quote(serialNumber, safe='')}/telemetry"
+            f"?deviceType=BAT_SYS&pwId={quote(powerStationId, safe='')}"
+        )
+        _, json_response = self._getWebResponse(url_part)
+        factors = self._flatten_web_factors(self._webResponseData(json_response))
+        telemetry = {}
+        for source, target in (
+            ("pBat", "power"),
+            ("voltage", "voltage"),
+            ("a", "current"),
+            ("soc", "soc"),
+            ("soh", "soh"),
+            ("batSysTemp", "temperature"),
+            ("aMaxChar", "max_charge_current"),
+            ("aMaxDischar", "max_discharge_current"),
+        ):
+            if (value := self._webNumber(factors.get(source), source)) is not None:
+                telemetry[target] = value * 1000 if source == "pBat" else value
+        if not telemetry:
+            raise exceptions.GoodweException(
+                "SEMS+ battery telemetry contains no usable measurements"
+            )
+        return telemetry
+
     def getWebInverterTelecounting(self, powerStationId, serialNumber, device_type="INVERTER"):
         endpoint = f"/sems-plant/api/equipments/{serialNumber}/telecounting"
         common_query = f"deviceType={device_type}&pwId={powerStationId}"
@@ -700,7 +761,15 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
 
         factors = self._flatten_web_factors(groups + period_groups)
         counters = {}
-        mapping = (("proPvStatsToday", "eday"), ("proPvStatsTotal", "etotal"), ("proPvStatsWeek", "eweek"), ("proPvStatsMonth", "thismonthetotle"), ("proPvStatsYear", "eyear"))
+        mapping = (
+            ("proPvStatsToday", "eday"),
+            ("proPvStatsTotal", "etotal"),
+            ("proPvStatsWeek", "eweek"),
+            ("proPvStatsMonth", "thismonthetotle"),
+            ("proPvStatsYear", "eyear"),
+            ("proCharStatsToday", "battery_charge_today"),
+            ("proDischarStatsToday", "battery_discharge_today"),
+        )
         for src, tgt in mapping:
             if (v := self._webNumber(factors.get(src), src)) is not None:
                 counters[tgt] = v
@@ -751,6 +820,42 @@ class GoodWeSEMSPlus(_GoodWeAccountBase):
             inverter.update(device)
             inverter.update(telemetry)
             inverter.update(counters)
+            if (
+                inverter.get("subtype") == "store"
+                or device_type == "ENERGY_STORAGE_INTEGRATED_CABINET"
+            ):
+                batteries = []
+                try:
+                    battery_devices = self.getWebBatteryDevices(powerStationId, sn)
+                except (requests.exceptions.RequestException, exceptions.GoodweException) as exp:
+                    message = (
+                        "Failed to retrieve battery devices for inverter '%s' "
+                        "at station '%s': %s" % (sn, powerStationId, exp)
+                    )
+                    logging.error(message)
+                    Domoticz.Error(message)
+                else:
+                    for battery_device in battery_devices:
+                        battery_sn = battery_device["sn"]
+                        try:
+                            battery_telemetry = self.getWebBatteryTelemetry(
+                                powerStationId, battery_sn
+                            )
+                        except (
+                            requests.exceptions.RequestException,
+                            exceptions.GoodweException,
+                        ) as exp:
+                            message = (
+                                "Failed to retrieve battery telemetry for battery "
+                                "'%s' on inverter '%s': %s"
+                                % (battery_sn, sn, exp)
+                            )
+                            logging.error(message)
+                            Domoticz.Error(message)
+                            continue
+                        batteries.append({"sn": battery_sn, **battery_telemetry})
+                if batteries:
+                    inverter["batteries"] = batteries
             if non_producing and inverter.get("etotal") == 0:
                 inverter.pop("etotal")
             # Normalize fields expected by legacy code

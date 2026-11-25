@@ -17,12 +17,12 @@
 # AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.4.0" author="Jan-Jaap Kostelijk">
+<plugin key="GoodWeSEMS" name="GoodWe solar inverter via SEMS API" version="6.4.0" author="Jan-Jaap Kostelijk"> <!-- x-release-please-version -->
     <description>
         <h2>GoodWe inverter (via SEMS portal)</h2>
         <p>This plugin uses the GoodWe SEMS PLUS API to retrieve the status information of your GoodWe inverter.</p>
         <p>The retired legacy SEMS API is no longer supported.</p>
-        <p>Version: 6.4.0</p>
+        <p>Version: 6.4.0</p> <!-- x-release-please-version -->
         <p>Important upgrade note: <a href="https://github.com/JanJaapKo/domoticz-GoodWeSEMS/wiki">plugin wiki</a></p>
         <h3>Configuration</h3>
         <ul>
@@ -120,6 +120,10 @@ class GoodWeSEMSPlugin:
         self.outputVoltageBUnit = 20 + startNum
         self.outputVoltageCUnit = 21 + startNum
         self.outputCurrent3PhaseUnit = 24 + startNum
+        self.batteryChargeTodayUnit = 25 + startNum
+        self.batteryDischargeTodayUnit = 26 + startNum
+        self.batteryUnitStart = 27 + startNum
+        self.batteryUnitsPerBattery = 8
         self.enabled = False
         return
 
@@ -298,6 +302,49 @@ class GoodWeSEMSPlugin:
                     UpdateDevice(inverter["sn"], ampsUnit, 0, inputAmps, AlwaysUpdate=True)
                     newCounter = calculateNewEnergy(inverter["sn"], powerUnit, inputPower)
                     UpdateDevice(inverter["sn"], powerUnit, 0, "{:5.1f};{:10.2f}".format(inputPower, newCounter), AlwaysUpdate=True)
+                is_battery_inverter = (
+                    inverter.get("subtype") == "store"
+                    or inverter.get("deviceType") == "ENERGY_STORAGE_INTEGRATED_CABINET"
+                )
+                if is_battery_inverter:
+                    for field, unit in (
+                        ("battery_charge_today", self.batteryChargeTodayUnit),
+                        ("battery_discharge_today", self.batteryDischargeTodayUnit),
+                    ):
+                        if inverter.get(field) is not None:
+                            UpdateDevice(
+                                inverter["sn"],
+                                unit,
+                                0,
+                                str(inverter[field]),
+                                AlwaysUpdate=True,
+                            )
+                    for battery_index, battery in enumerate(inverter.get("batteries", [])):
+                        if not isinstance(battery, dict):
+                            continue
+                        unit_start = (
+                            self.batteryUnitStart
+                            + battery_index * self.batteryUnitsPerBattery
+                        )
+                        for field, offset in (
+                            ("soc", 0),
+                            ("power", 1),
+                            ("voltage", 2),
+                            ("current", 3),
+                            ("soh", 4),
+                            ("temperature", 5),
+                            ("max_charge_current", 6),
+                            ("max_discharge_current", 7),
+                        ):
+                            value = battery.get(field)
+                            if value is not None:
+                                UpdateDevice(
+                                    inverter["sn"],
+                                    unit_start + offset,
+                                    0,
+                                    str(value),
+                                    AlwaysUpdate=True,
+                                )
                 #log data of battery
                 Domoticz.Debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter.get("battery", ""),inverter.get("bms_status", ""),inverter.get("battery_power", "")))
                 logging.debug("Battery values: battery: '{0}', bms_status: '{1}', battery_power: '{2}'".format(inverter.get("battery", ""),inverter.get("bms_status", ""),inverter.get("battery_power", "")))
@@ -426,6 +473,86 @@ class GoodWeSEMSPlugin:
             Domoticz.Unit(Name="Inverter state control (SN: " + serialNumber + ")",
                             Unit=(self.inverterStateCommand), TypeName="Selector Switch", Image=1,
                             Options=Options, Used=0, DeviceID=serialNumber).Create()
+
+        is_battery_inverter = (
+            inverterData is not None
+            and (
+                inverterData.get("subtype") == "store"
+                or inverterData.get("deviceType") == "ENERGY_STORAGE_INTEGRATED_CABINET"
+            )
+        )
+        if is_battery_inverter:
+            for field, unit, name in (
+                (
+                    "battery_charge_today",
+                    self.batteryChargeTodayUnit,
+                    "Battery charge today",
+                ),
+                (
+                    "battery_discharge_today",
+                    self.batteryDischargeTodayUnit,
+                    "Battery discharge today",
+                ),
+            ):
+                if (
+                    inverterData.get(field) is not None
+                    and (
+                        serialNumber not in Devices
+                        or unit not in Devices[serialNumber].Units
+                    )
+                ):
+                    Domoticz.Unit(
+                        Name=name + " (SN: " + serialNumber + ")",
+                        DeviceID=serialNumber,
+                        Unit=unit,
+                        TypeName="Custom",
+                        Options={"Custom": "kWh"},
+                        Used=1,
+                    ).Create()
+
+            battery_sensors = (
+                ("soc", 0, "Battery percentage", "General", None, 6),
+                ("power", 1, "Battery in/output power", None, 250, 1),
+                ("voltage", 2, "Battery voltage", None, 243, 8),
+                ("current", 3, "Battery current", None, 243, 23),
+                ("soh", 4, "Battery state of health", "General", None, 6),
+                ("temperature", 5, "Battery temperature", None, 80, 5),
+                ("max_charge_current", 6, "Battery max charge current", None, 243, 23),
+                ("max_discharge_current", 7, "Battery max discharge current", None, 243, 23),
+            )
+            for battery_index, battery in enumerate(inverterData.get("batteries", [])):
+                if not isinstance(battery, dict):
+                    continue
+                unit_start = (
+                    self.batteryUnitStart
+                    + battery_index * self.batteryUnitsPerBattery
+                )
+                for field, offset, name, type_name, device_type, subtype in battery_sensors:
+                    unit = unit_start + offset
+                    if (
+                        battery.get(field) is None
+                        or (
+                            serialNumber in Devices
+                            and unit in Devices[serialNumber].Units
+                        )
+                    ):
+                        continue
+                    unit_kwargs = {"TypeName": type_name} if type_name else {"Type": device_type}
+                    Domoticz.Unit(
+                        Name=(
+                            name.replace(
+                                "Battery ", "Battery " + str(battery_index + 1) + " ", 1
+                            )
+                            + " (SN: "
+                            + serialNumber
+                            + ")"
+                        ),
+                        DeviceID=serialNumber,
+                        Unit=unit,
+                        Subtype=subtype,
+                        Used=1,
+                        **unit_kwargs,
+                    ).Create()
 
         if serialNumber in Devices:
             Domoticz.Debug("Number of Units: " + str(len(Devices[serialNumber].Units)) + ", number of units: " + str(len(Devices[serialNumber].Units)) + ")")

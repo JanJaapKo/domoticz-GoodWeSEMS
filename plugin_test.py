@@ -1,10 +1,10 @@
 import unittest
 import base64
 import hashlib
+import io
 import json
-import os
 import re
-import subprocess
+from contextlib import redirect_stdout
 from pathlib import Path
 import GoodWe as goodwe_module
 from unittest.mock import Mock, patch
@@ -15,6 +15,7 @@ from GoodWe import Inverter
 import exceptions
 import logging
 import manual_test
+import telemetry_manual_test
 
 
 def make_response(payload, url="https://example.test/api"):
@@ -24,6 +25,94 @@ def make_response(payload, url="https://example.test/api"):
     response.text = json.dumps(payload)
     response.json.return_value = payload
     return response
+
+
+class TelemetryManualTest(unittest.TestCase):
+    def test_request_web_endpoint_uses_account_headers_and_json_payload(self):
+        account = GoodWeSEMSPlus("eu.semsportal.com", "443", "user@example.com", "password")
+        account.token = {
+            "uid": "user-id",
+            "token": "sems-session-token",
+            "client": "semsPlusWeb",
+            "api": "https://eu-gateway.semsportal.com/web/sems",
+        }
+        account.base_url = account.token["api"]
+        response = make_response({"code": "00000", "data": {"dataList": []}})
+
+        with patch(
+            "GoodWe.requests.post", return_value=response
+        ) as post:
+            result = telemetry_manual_test.request_web_endpoint(
+                account,
+                "POST",
+                "/sems-plant/api/stations/statistics",
+                {"stationId": "station-1"},
+            )
+
+        self.assertEqual(result["code"], "00000")
+        post.assert_called_once()
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://eu-gateway.semsportal.com/web/sems/"
+            "sems-plant/api/stations/statistics",
+        )
+        self.assertEqual(
+            post.call_args.kwargs["json"], {"stationId": "station-1"}
+        )
+        self.assertTrue(post.call_args.kwargs["headers"]["X-Signature"])
+
+    def test_ha_battery_probe_deduplicates_storage_inverters_and_reuses_core_data(self):
+        account = Mock()
+        station_data = {
+            "inverter": [
+                {"sn": "hybrid-1", "subtype": "store", "deviceType": "INVERTER"},
+                {"sn": "grid-1", "subtype": "grid", "deviceType": "INVERTER"},
+                {"sn": "hybrid-1", "subtype": "store", "deviceType": "INVERTER"},
+            ]
+        }
+        related_devices = [
+            {
+                "type": "BAT_SYS",
+                "sn": "battery-1",
+                "translateCode": "battery-slot-1",
+                "no": 0,
+                "isConnected": True,
+            }
+        ]
+        calls = []
+
+        def request(account_arg, method, url_part, payload=None):
+            calls.append((method, url_part, payload, account_arg))
+            if "/relatedDevices?" in url_part:
+                return related_devices
+            return {"code": "00000", "data": {}}
+
+        with patch.object(
+            telemetry_manual_test, "request_web_endpoint", side_effect=request
+        ), redirect_stdout(io.StringIO()):
+            failures = telemetry_manual_test.probe_ha_battery_endpoints(
+                account, "station-1", station_data
+            )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            sum("relatedDevices?" in call[1] for call in calls), 1
+        )
+        self.assertEqual(
+            sum("deviceType=BAT_SYS" in call[1] for call in calls), 1
+        )
+        self.assertFalse(any("all-status" in call[1] for call in calls))
+        self.assertFalse(any("/telecounting" in call[1] for call in calls))
+        self.assertFalse(
+            any(
+                "deviceType=INVERTER" in call[1] and "/telemetry" in call[1]
+                for call in calls
+            )
+        )
+        self.assertEqual(
+            sum("get-cache-device-function-parameters" in call[1] for call in calls),
+            1,
+        )
 
 
 class PluginVersionTest(unittest.TestCase):
@@ -43,93 +132,11 @@ class PluginVersionTest(unittest.TestCase):
         self.assertIsNotNone(displayed_version, "Displayed plugin version is missing")
         self.assertEqual(self.version_match.group(1), displayed_version.group(1))
 
-    def test_feature_branch_check_uses_remote_merge_base(self):
-        major, minor, _ = map(int, self.version_match.group(1).split("."))
-        base_version = (
-            f"{major}.{minor - 1}.0" if minor else f"{major - 1}.0.0"
-        )
-        base_source = re.sub(
-            r'(<plugin\b[^>]*\bversion=")\d+\.\d+\.\d+(")',
-            rf"\g<1>{base_version}\2",
-            self.plugin_source,
-            count=1,
-        )
-        command_results = [
-            subprocess.CompletedProcess([], 128, "", "unknown revision"),
-            subprocess.CompletedProcess([], 0, "branch-point\n", ""),
-            subprocess.CompletedProcess([], 0, base_source, ""),
-        ]
-        with patch.dict(os.environ, {"GITHUB_BASE_REF": "master"}):
-            with patch.object(
-                subprocess, "run", side_effect=command_results
-            ) as run:
-                self.test_feature_branch_increases_major_or_minor_version()
-
-        self.assertEqual(
-            [call.args[0] for call in run.call_args_list],
-            [
-                ["git", "merge-base", "HEAD", "master"],
-                ["git", "merge-base", "HEAD", "origin/master"],
-                ["git", "show", "branch-point:plugin.py"],
-            ],
-        )
-
-    def test_feature_branch_increases_major_or_minor_version(self):
-        base_ref = os.environ.get("GITHUB_BASE_REF")
-        if not base_ref:
-            branch = os.environ.get("GITHUB_REF_NAME")
-            if not branch:
-                branch = subprocess.run(
-                    ["git", "branch", "--show-current"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                ).stdout.strip()
-            if branch == "master":
-                self.skipTest("The default branch has no feature-branch version bump")
-            base_ref = "master"
-
-        base_refs = [base_ref]
-        if not base_ref.startswith("origin/"):
-            base_refs.append(f"origin/{base_ref}")
-
-        base_commit = None
-        for ref in base_refs:
-            result = subprocess.run(
-                ["git", "merge-base", "HEAD", ref],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                base_commit = result.stdout.strip()
-                base_ref = ref
-                break
-        self.assertIsNotNone(
-            base_commit,
-            f"Could not find merge base with {', '.join(base_refs)}",
-        )
-
-        base_source = subprocess.run(
-            ["git", "show", f"{base_commit}:plugin.py"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-        base_version_match = re.search(
-            r'<plugin\b[^>]*\bversion="(\d+\.\d+\.\d+)"', base_source
-        )
-        self.assertIsNotNone(
-            base_version_match,
-            f"Plugin version is missing at merge base with {base_ref}",
-        )
-
-        current_version = tuple(map(int, self.version_match.group(1).split(".")))
-        base_version = tuple(map(int, base_version_match.group(1).split(".")))
-        self.assertGreater(
-            current_version[:2],
-            base_version[:2],
-            f"Feature branches must bump the major or minor version above {base_ref}",
-        )
+    def test_version_file_matches_plugin_version(self):
+        version_file = Path(__file__).with_name("version.txt").read_text(
+            encoding="utf-8"
+        ).strip()
+        self.assertEqual(self.version_match.group(1), version_file)
 
 
 class BasicInverterTest(unittest.TestCase):
@@ -495,6 +502,97 @@ class PluginBehaviorTest(unittest.TestCase):
         self.assertNotIn(plugin.outputVoltageBUnit, units)
         self.assertNotIn(plugin.outputVoltageCUnit, units)
         self.assertNotIn(plugin.outputCurrent3PhaseUnit, units)
+
+    def test_update_devices_maps_ha_battery_sensors_only_to_storage_inverters(self):
+        plugin = self.plugin_module._plugin
+        station = PowerStation(stationData={
+            "info": {"powerstation_id": "station-uuid"},
+            "inverter": [
+                {"sn": "hybrid-1", "subtype": "store"},
+                {"sn": "grid-1", "subtype": "grid"},
+            ],
+        })
+        account = Mock()
+        account.powerStationList = {"station-uuid": station}
+        account.INVERTER_STATE = GoodWeSEMSPlus.INVERTER_STATE
+        plugin.goodWeAccount = account
+        self.plugin_module.Devices = {}
+        data = {"inverter": [
+            {
+                "sn": "hybrid-1",
+                "subtype": "store",
+                "deviceType": "INVERTER",
+                "fault_message": "",
+                "status": 0,
+                "battery_charge_today": 0.4,
+                "battery_discharge_today": 1.7,
+                "batteries": [{
+                    "sn": "battery-1",
+                    "soc": 9,
+                    "power": 33.53,
+                    "voltage": 47.9,
+                    "current": 0.7,
+                    "soh": 100,
+                    "temperature": 15.2,
+                    "max_charge_current": 50,
+                    "max_discharge_current": 20,
+                }],
+            },
+            {
+                "sn": "grid-1",
+                "subtype": "grid",
+                "deviceType": "INVERTER",
+                "fault_message": "",
+                "status": 0,
+                "batteries": [{
+                    "sn": "unexpected-battery",
+                    "soc": 50,
+                }],
+            },
+        ]}
+
+        plugin.updateDevices(data, "station-uuid")
+
+        hybrid_units = self.plugin_module.Devices["hybrid-1"].Units
+        self.assertEqual(hybrid_units[plugin.batteryChargeTodayUnit].sValue, "0.4")
+        self.assertEqual(hybrid_units[plugin.batteryDischargeTodayUnit].sValue, "1.7")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart].sValue, "9")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 1].sValue, "33.53")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 2].sValue, "47.9")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 3].sValue, "0.7")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 4].sValue, "100")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 5].sValue, "15.2")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 6].sValue, "50")
+        self.assertEqual(hybrid_units[plugin.batteryUnitStart + 7].sValue, "20")
+        self.assertEqual(
+            (hybrid_units[plugin.batteryUnitStart].TypeName,
+             hybrid_units[plugin.batteryUnitStart].Subtype),
+            ("General", 6),
+        )
+        self.assertIn("Battery 1 percentage", hybrid_units[plugin.batteryUnitStart].Name)
+        self.assertEqual(
+            (hybrid_units[plugin.batteryUnitStart + 1].Type,
+             hybrid_units[plugin.batteryUnitStart + 1].Subtype),
+            (250, 1),
+        )
+        self.assertEqual(
+            hybrid_units[plugin.batteryChargeTodayUnit].Options,
+            {"Custom": "kWh"},
+        )
+        grid_units = self.plugin_module.Devices["grid-1"].Units
+        self.assertFalse(any(unit >= plugin.batteryChargeTodayUnit for unit in grid_units))
+        self.assertFalse(
+            any("setpoint" in unit.Name.lower() for unit in hybrid_units.values())
+        )
+
+        soc_unit = hybrid_units[plugin.batteryUnitStart]
+        soc_unit.sValue = "7"
+        data["inverter"][0].pop("battery_charge_today")
+        data["inverter"][0].pop("battery_discharge_today")
+        data["inverter"][0]["batteries"] = []
+        plugin.updateDevices(data, "station-uuid")
+        self.assertEqual(soc_unit.sValue, "7")
+        self.assertEqual(soc_unit.update_called, 1)
 
     def test_update_devices_updates_offline_state_without_measurements(self):
         plugin = self.plugin_module.GoodWeSEMSPlugin()
@@ -964,6 +1062,60 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             "https://eu-gateway.semsportal.com/web/sems/sems-plant/api/stations/device/all-status?stationId=station-uuid",
         )
 
+    def test_web_battery_device_request_keeps_connected_battery_systems_only(self):
+        response = make_response({"data": [
+            {"type": "BAT_SYS", "sn": "battery-1", "isConnected": True},
+            {"type": "BAT_SYS", "sn": "battery-2", "isConnected": False},
+            {"type": "INVERTER", "sn": "inverter-1", "isConnected": True},
+            {"type": "BAT_SYS", "sn": "battery-1", "isConnected": True},
+        ]})
+
+        with patch("GoodWe.requests.get", return_value=response) as get:
+            batteries = self.account.getWebBatteryDevices(
+                "station-uuid", "inverter-1"
+            )
+
+        self.assertEqual([battery["sn"] for battery in batteries], ["battery-1"])
+        self.assertEqual(
+            get.call_args.args[0],
+            "https://eu-gateway.semsportal.com/web/sems/"
+            "sems-plant/api/equipments/inverter-1/relatedDevices"
+            "?sn=inverter-1&deviceType=ENERGY_STORAGE_INTEGRATED_CABINET"
+            "&pwId=station-uuid",
+        )
+
+    def test_web_battery_telemetry_maps_ha_sensors_and_preserves_signed_power(self):
+        response = make_response({"data": [{"factors": [
+            {"code": "pBat", "data": "-1.0922"},
+            {"code": "voltage", "data": "47.9"},
+            {"code": "a", "data": "0.7"},
+            {"code": "soc", "data": "89"},
+            {"code": "soh", "data": "100"},
+            {"code": "batSysTemp", "data": "15.2"},
+            {"code": "aMaxChar", "data": "50"},
+            {"code": "aMaxDischar", "data": "20"},
+        ]}]})
+
+        with patch("GoodWe.requests.get", return_value=response) as get:
+            telemetry = self.account.getWebBatteryTelemetry(
+                "station-uuid", "battery-1"
+            )
+
+        self.assertEqual(telemetry, {
+            "power": -1092.2,
+            "voltage": 47.9,
+            "current": 0.7,
+            "soc": 89.0,
+            "soh": 100.0,
+            "temperature": 15.2,
+            "max_charge_current": 50.0,
+            "max_discharge_current": 20.0,
+        })
+        self.assertIn(
+            "/equipments/battery-1/telemetry?deviceType=BAT_SYS&pwId=station-uuid",
+            get.call_args.args[0],
+        )
+
     def test_web_telemetry_maps_ac_frequency_temperature_and_four_pv_strings(self):
         factor_values = {
             "Temperature": "36.5",
@@ -1076,6 +1228,8 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         responses = [
             make_response({"data": [{"factors": [
                 {"code": "proPvStatsToday", "data": "3.2"},
+                {"code": "proCharStatsToday", "data": "0.4"},
+                {"code": "proDischarStatsToday", "data": "1.7"},
             ]}]}),
             make_response({"data": [{"factors": [
                 {"code": "proPvStatsWeek", "data": "bad-value"},
@@ -1100,6 +1254,8 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             "etotal": 1200.5,
             "thismonthetotle": 31.0,
             "eyear": 400.0,
+            "battery_charge_today": 0.4,
+            "battery_discharge_today": 1.7,
         })
         self.assertEqual(
             [call.args[0] for call in get.call_args_list],
@@ -1207,6 +1363,7 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
             {"output_power": 0.0},
         ])
         self.account.getWebInverterTelecounting = Mock(side_effect=[{"etotal": 12.5}, {"etotal": 0}])
+        self.account.getWebBatteryDevices = Mock(return_value=[])
 
         result = self.account.getWebData("station-uuid")
 
@@ -1224,6 +1381,55 @@ class GoodWeSemsWebApiTest(unittest.TestCase):
         self.account.getWebInverterTelemetry.assert_any_call(
             "station-uuid", "serial-2", "ENERGY_STORAGE_INTEGRATED_CABINET"
         )
+
+    def test_get_web_data_fetches_battery_telemetry_only_for_storage_inverters(self):
+        self.account.getWebInverterDevices = Mock(return_value=[
+            {"sn": "hybrid-1", "deviceType": "INVERTER", "subtype": "store", "status": 0},
+            {"sn": "grid-1", "deviceType": "INVERTER", "subtype": "grid", "status": 0},
+        ])
+        self.account.getWebInverterTelemetry = Mock(return_value={"tempperature": 25})
+        self.account.getWebInverterTelecounting = Mock(return_value={"etotal": 10})
+        self.account.getWebBatteryDevices = Mock(
+            return_value=[{"type": "BAT_SYS", "sn": "battery-1"}]
+        )
+        self.account.getWebBatteryTelemetry = Mock(return_value={
+            "power": 35.0,
+            "soc": 9.0,
+        })
+
+        result = self.account.getWebData("station-uuid")
+
+        hybrid, grid = result["inverter"]
+        self.assertEqual(hybrid["batteries"], [{
+            "sn": "battery-1",
+            "power": 35.0,
+            "soc": 9.0,
+        }])
+        self.assertNotIn("batteries", grid)
+        self.account.getWebBatteryDevices.assert_called_once_with(
+            "station-uuid", "hybrid-1"
+        )
+        self.account.getWebBatteryTelemetry.assert_called_once_with(
+            "station-uuid", "battery-1"
+        )
+
+    def test_battery_endpoint_failure_does_not_skip_inverter_data(self):
+        self.account.getWebInverterDevices = Mock(return_value=[
+            {"sn": "hybrid-1", "deviceType": "INVERTER", "subtype": "store", "status": 0},
+        ])
+        self.account.getWebInverterTelemetry = Mock(return_value={"tempperature": 25})
+        self.account.getWebInverterTelecounting = Mock(return_value={"etotal": 10})
+        self.account.getWebBatteryDevices = Mock(
+            side_effect=goodwe_module.requests.exceptions.Timeout("offline")
+        )
+
+        with patch("GoodWe.Domoticz.Error") as domoticz_error:
+            result = self.account.getWebData("station-uuid")
+
+        self.assertEqual(len(result["inverter"]), 1)
+        self.assertEqual(result["inverter"][0]["tempperature"], 25)
+        self.assertNotIn("batteries", result["inverter"][0])
+        domoticz_error.assert_called_once()
 
     def test_web_responses_reject_api_errors_empty_and_malformed_data(self):
         payloads = (

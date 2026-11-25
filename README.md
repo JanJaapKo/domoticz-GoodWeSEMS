@@ -91,6 +91,23 @@ Current features
 |21	|(Hardware name) - Inverter output voltage phase C (SN: (your S/N))	|Voltage| Created when reported
 |24	|(Hardware name) - Inverter output current (3-phase) (SN: (your S/N))	|Current/Ampere (3 Phase)| Created when phase B or C is reported; sValue order is A;B;C;
 
+Battery-capable inverters (subtype `store` or device type `ENERGY_STORAGE_INTEGRATED_CABINET`) also create the following devices when the SEMS+ API reports the corresponding values:
+
+|Unit	|Description	|Type   |Remark
+|---    |---            |---    |---
+|25	|(Hardware name) - Battery charge today (SN: (your S/N))	|Custom Sensor (kWh)	| Created when reported
+|26	|(Hardware name) - Battery discharge today (SN: (your S/N))	|Custom Sensor (kWh)	| Created when reported
+|27+	|(Hardware name) - Battery 1 percentage (SN: (your S/N))	|General (percentage)	| One set per battery; 8 units per battery
+|28+	|(Hardware name) - Battery 1 in/output power (SN: (your S/N))	|Type 250, subtype 1	| One set per battery
+|29+	|(Hardware name) - Battery 1 voltage (SN: (your S/N))	|Voltage	| One set per battery
+|30+	|(Hardware name) - Battery 1 current (SN: (your S/N))	|Current	| One set per battery
+|31+	|(Hardware name) - Battery 1 state of health (SN: (your S/N))	|General (percentage)	| One set per battery
+|32+	|(Hardware name) - Battery 1 temperature (SN: (your S/N))	|LaCrosse TX3	| One set per battery
+|33+	|(Hardware name) - Battery 1 max charge current (SN: (your S/N))	|Current	| One set per battery
+|34+	|(Hardware name) - Battery 1 max discharge current (SN: (your S/N))	|Current	| One set per battery
+
+The eight per-battery units repeat in the same order for each additional battery, increasing by eight for each battery. A battery-specific device is created only when the corresponding value is reported.
+
 
 There is a lot more information available trough the GoodWe API if you would like to have a specific feature added to this plugin please submit an issue as indicated in the paragraph above. 
 
